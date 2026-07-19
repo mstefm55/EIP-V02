@@ -1,0 +1,30 @@
+name: V2 Security Governance Gates
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  governance-gates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate security controls
+        run: node scripts/validate_security_controls.mjs
+
+      - name: Validate tenant scope
+        run: node scripts/validate_tenant_scope.mjs
+
+      - name: Validate process governance
+        run: node scripts/validate_process_governance.mjs

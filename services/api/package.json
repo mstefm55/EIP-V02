@@ -1,0 +1,29 @@
+{
+  "name": "@eip/core-api-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env.v2.local --watch src/server.js",
+    "start": "node --env-file-if-exists=.env.v2.local src/server.js",
+    "seed:auth": "node --env-file-if-exists=.env.v2.local scripts/bootstrap_v2_auth_seed.mjs",
+    "migrate:v2": "node --env-file-if-exists=.env.v2.local scripts/apply_v2_migrations.mjs",
+    "seed:staging:smoke": "node --env-file-if-exists=.env.v2.staging scripts/seed_staging_smoke_identities.mjs",
+    "test:auth:security": "node --env-file-if-exists=.env.v2.local scripts/test_auth_security_flow.mjs",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "gate:no-downgrade": "node --env-file-if-exists=.env.v2.local scripts/no_downgrade_gate.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "argon2": "^0.44.0",
+    "fastify": "^5.8.4",
+    "fastify-plugin": "^5.0.1",
+    "nodemailer": "^8.0.4",
+    "otplib": "^13.1.1",
+    "pg": "^8.16.3"
+  }
+}

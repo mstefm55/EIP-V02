@@ -1,0 +1,24 @@
+{
+  "name": "@eip/workbench-ui-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4174",
+    "test:smoke": "playwright test --config ./playwright.config.mjs",
+    "test:smoke:staging": "node ./tests/run-staging-smoke.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^0.563.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@vitejs/plugin-react-swc": "^4.2.2",
+    "vite": "^7.2.4"
+  }
+}
