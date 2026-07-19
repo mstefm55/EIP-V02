@@ -85,6 +85,7 @@ CORS_ORIGIN=https://<workbench-domain>
 CORS_CREDENTIALS=true
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 DATABASE_SSL=true
+DATABASE_SSL_ALLOW_INVALID_CERTS=false
 AUTH_SESSION_PEPPER=<strong random secret>
 AUTH_CSRF_PEPPER=<strong random secret>
 AUTH_DEVICE_PEPPER=<strong random secret>
@@ -160,7 +161,17 @@ cd /app/services/api && npm run migrate:v2
 
 The Railway API config runs this as the pre-deploy command, after the Docker image is built and before the API container starts. The command executes inside the built API image, where both `/app/services/api` and `/app/db/migrations` are present.
 
-The migration script uses `DATABASE_URL` when present, otherwise the `DATABASE_*`/`DB_*` variables. It reads migration files from `db/migrations` relative to the repository root structure copied into the image.
+The migration script uses `DATABASE_URL` when present, otherwise the discrete `DATABASE_*`/`DB_*`/`PG*` variables. Railway should use:
+
+```txt
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+```
+
+No separate `PGHOST`/`PGUSER` workaround is required for Railway.
+
+`DATABASE_SSL`, fallback `DB_SSL`, and `DATABASE_SSL_ALLOW_INVALID_CERTS` apply to both the API runtime and the migration runner. In production, the migration runner fails closed if neither `DATABASE_URL` nor an explicit database host is configured; it will not silently connect to localhost.
+
+The migration script reads migration files from `db/migrations` relative to the repository root structure copied into the image.
 
 Do not add new V2 business tables as part of deployment bootstrap. New tables must pass the V2 DB checklist and justification register.
 

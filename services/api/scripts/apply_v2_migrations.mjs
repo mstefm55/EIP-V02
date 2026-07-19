@@ -2,32 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-
-function pick(...values) {
-  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== "");
-}
-
-function parseInteger(value, fallback) {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function resolveDbConfig() {
-  return {
-    host: pick(process.env.DATABASE_HOST, process.env.DB_HOST, process.env.PGHOST, "localhost"),
-    port: parseInteger(pick(process.env.DATABASE_PORT, process.env.DB_PORT, process.env.PGPORT), 5432),
-    user: pick(process.env.DATABASE_USER, process.env.DB_USER, process.env.PGUSER, "postgres"),
-    password: pick(process.env.DATABASE_PASSWORD, process.env.DB_PASSWORD, process.env.PGPASSWORD, ""),
-    database: pick(
-      process.env.DATABASE_NAME,
-      process.env.DB_DATABASE,
-      process.env.DATABASE,
-      process.env.PGDATABASE,
-      process.env.V2_DATABASE_NAME,
-      "eip_V2"
-    ),
-  };
-}
+import { redactConnectionSecrets, resolveDbConfig } from "./migrationDbConfig.mjs";
 
 function resolveMigrationsDir() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +81,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${JSON.stringify({ ok: false, error: error?.message || String(error) }, null, 2)}\n`);
+  const safeMessage = redactConnectionSecrets(error?.message || String(error));
+  process.stderr.write(`${JSON.stringify({ ok: false, error: safeMessage }, null, 2)}\n`);
   process.exit(1);
 });
