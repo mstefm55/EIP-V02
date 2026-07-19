@@ -23,6 +23,8 @@ Use separate Railway services:
 
 For the API service, keep the Railway service root as the repository root so `services/api/scripts/apply_v2_migrations.mjs` can still read `db/migrations`.
 
+Do not set the Railway Root Directory to `/services/api`. The Docker build context must remain the repository root because the API image intentionally includes both `services/api` and `db/migrations`.
+
 ## Railway API config template
 
 The API config template is:
@@ -39,22 +41,36 @@ In Railway, configure the API service to use this config file path if you want c
 
 The template sets:
 
-- builder: `RAILPACK`
-- build command: `cd services/api && npm ci`
-- start command: `cd services/api && npm run start`
+- builder: `DOCKERFILE`
+- Dockerfile path: `deploy/Dockerfile.api`
+- Docker build context: repository root
+- pre-deploy command: `cd /app/services/api && npm run migrate:v2`
+- runtime command: Dockerfile `CMD ["npm", "run", "start"]`
 - healthcheck path: `/api/public/health`
 
 Do not point a Workbench UI/static service at this API config.
+
+The API Dockerfile is:
+
+```txt
+deploy/Dockerfile.api
+```
+
+It uses Node 20, installs production API dependencies with `npm ci --omit=dev --prefix services/api`, copies `services/api`, and copies `db/migrations`. Local env files, logs, certs, build output, and dependency folders are excluded by the root `.dockerignore`.
 
 ## Create Railway project
 
 1. Create a new Railway project.
 2. Add a PostgreSQL service.
 3. Add a GitHub-connected service for this repository.
-4. Use the API config file path above for the API service, or manually set the same build/start/healthcheck settings.
-5. Add required environment variables.
-6. Run migrations against the Railway PostgreSQL database before opening production traffic.
-7. Confirm `/api/public/health` returns `200`.
+4. Keep the Railway service root as the repository root.
+5. Set the API service config file path to `/deploy/railway.api.json`.
+6. Confirm the API service uses `deploy/Dockerfile.api` from the repository root Docker context.
+7. Add required environment variables.
+8. Let the configured pre-deploy command run migrations.
+9. Confirm `/api/public/health` returns `200`.
+
+Do not set Railway Root Directory to `/services/api`; doing that hides `db/migrations` from the migration runner.
 
 ## Required API variables
 
@@ -139,10 +155,12 @@ npm run migrate:v2
 On Railway, run the equivalent command after variables are set:
 
 ```bash
-cd services/api && npm run migrate:v2
+cd /app/services/api && npm run migrate:v2
 ```
 
-The migration script uses `DATABASE_URL` when present, otherwise the `DATABASE_*`/`DB_*` variables. It reads migration files from `db/migrations`.
+The Railway API config runs this as the pre-deploy command, after the Docker image is built and before the API container starts. The command executes inside the built API image, where both `/app/services/api` and `/app/db/migrations` are present.
+
+The migration script uses `DATABASE_URL` when present, otherwise the `DATABASE_*`/`DB_*` variables. It reads migration files from `db/migrations` relative to the repository root structure copied into the image.
 
 Do not add new V2 business tables as part of deployment bootstrap. New tables must pass the V2 DB checklist and justification register.
 
@@ -185,10 +203,10 @@ Before connecting Railway production:
 
 ```powershell
 git status --short
-cd services/api
-npm test
-cd ..\..\apps\workbench-ui
-npm run build
+npm --prefix services/api test
+node scripts/validate_staging_deployment.mjs
+git diff --check
+docker build -f deploy/Dockerfile.api -t eip-v2-api-test .
 ```
 
 If a Railway deployment target is not already confirmed, stop after pushing GitHub and configure Railway manually.

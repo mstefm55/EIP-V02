@@ -1,0 +1,14 @@
+FROM node:20-bookworm-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY services/api/package.json services/api/package-lock.json ./services/api/
+RUN npm ci --omit=dev --prefix services/api
+
+COPY services/api ./services/api
+COPY db/migrations ./db/migrations
+
+WORKDIR /app/services/api
+
+CMD ["npm", "run", "start"]

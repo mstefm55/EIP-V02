@@ -1,11 +1,13 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "RAILPACK",
-    "buildCommand": "cd services/api && npm ci"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "deploy/Dockerfile.api"
   },
   "deploy": {
-    "startCommand": "cd services/api && npm run start",
+    "preDeployCommand": [
+      "cd /app/services/api && npm run migrate:v2"
+    ],
     "healthcheckPath": "/api/public/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
