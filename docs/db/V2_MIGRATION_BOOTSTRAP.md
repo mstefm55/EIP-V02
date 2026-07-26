@@ -75,6 +75,27 @@ Recommended structure:
 
 The chain should represent real bootstrap work, not placeholders or dead markers.
 
+## Durable Migration Ledger
+
+The V2 runner maintains the applied-file ledger in `eip_core.schema_migration`.
+
+Rules:
+
+- The runner creates the ledger table before applying migrations.
+- Each file is recorded by filename and SHA-256 checksum.
+- A matching filename/checksum is skipped.
+- A matching filename with a different checksum fails closed.
+- New migrations are applied in deterministic filename order.
+- The runner owns the ledger; do not add seed data or feature state to it.
+
+For environments that were already migrated before this ledger existed, use the one-time controlled baseline mode:
+
+```bash
+cd /app/services/api && MIGRATION_BASELINE_EXISTING=true npm run migrate:v2
+```
+
+Baseline mode only records current migration filenames/checksums after verifying the expected V2 foundation objects already exist. It does not execute migration SQL and refuses to run if the ledger is not empty.
+
 ## Initial File Set
 
 Recommended starter files:
@@ -97,3 +118,4 @@ Recommended starter files:
 - The migration files are stable SQL, not placeholders.
 - The tenancy model is explicit, with POOL as the default and BRIDGE/SILO as future portability targets.
 - Any new/proposed table has a register entry with explicit insufficiency rationale and drift checks.
+- The migration ledger exists or is safely baselined before repeated deployment.

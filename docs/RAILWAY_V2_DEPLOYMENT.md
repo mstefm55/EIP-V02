@@ -173,6 +173,34 @@ No separate `PGHOST`/`PGUSER` workaround is required for Railway.
 
 The migration script reads migration files from `db/migrations` relative to the repository root structure copied into the image.
 
+The migration runner keeps a durable ledger in:
+
+```txt
+eip_core.schema_migration
+```
+
+Normal Railway pre-deploy command:
+
+```bash
+cd /app/services/api && npm run migrate:v2
+```
+
+For an existing Railway database that was already migrated before the ledger existed, run this one-time controlled baseline manually from a Railway shell/job with the same API environment variables:
+
+```bash
+cd /app/services/api && MIGRATION_BASELINE_EXISTING=true npm run migrate:v2
+```
+
+Baseline mode:
+
+- only works when `eip_core.schema_migration` is empty
+- verifies expected V2 foundation objects already exist
+- records current migration filenames and SHA-256 checksums
+- does not execute migration SQL
+- must not be added to the normal pre-deploy command
+
+Do not delete or recreate the Railway database to recover from a missing ledger. Do not seed auth identities as part of deployment.
+
 Do not add new V2 business tables as part of deployment bootstrap. New tables must pass the V2 DB checklist and justification register.
 
 ## Healthcheck

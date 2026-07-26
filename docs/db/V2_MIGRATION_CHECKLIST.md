@@ -15,9 +15,13 @@ Use this checklist before merging or replaying any V2 database change.
 
 - Every migration should replay cleanly in filename order from a fresh database.
 - The executable chain is authoritative; the consolidated delta draft is only a planning aid.
+- The migration runner must consult `eip_core.schema_migration` before executing a file.
+- Applied migrations are skipped only when filename and SHA-256 checksum match the ledger.
+- A filename with a changed checksum is a hard failure; do not edit applied migration files.
 - Replays should be validated against the canonical `pg_dump` / `pg_restore` baseline.
 - Stable filenames must remain monotonic and reviewable.
 - If a migration depends on session state, that dependency must be documented.
+- Baseline mode is only for existing environments that were migrated before the ledger existed, and it must verify V2 foundation objects before recording rows.
 
 ## Rollback Expectations
 
@@ -45,6 +49,7 @@ Use this checklist before merging or replaying any V2 database change.
 ## Evidence To Keep
 
 - Migration file names and order
+- Migration ledger rows and checksums
 - Validation queries for schema existence and policy shape
 - Rollback note or restore requirement
 - Any portability note needed for future BRIDGE or SILO deployment modes
