@@ -5,9 +5,7 @@
     "dockerfilePath": "deploy/Dockerfile.api"
   },
   "deploy": {
-    "preDeployCommand": [
-      "cd /app/services/api && npm run migrate:v2"
-    ],
+    "startCommand": "sh -lc 'set -x; cd /app/services/api && npm run migrate:v2 && npm run start'",
     "healthcheckPath": "/api/public/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
