@@ -6,7 +6,7 @@
   },
   "deploy": {
     "preDeployCommand": [
-      "cd /app/services/api && npm run migrate:v2"
+      "cd /app/services/api && MIGRATION_BASELINE_EXISTING=true npm run migrate:v2"
     ],
     "healthcheckPath": "/api/public/health",
     "healthcheckTimeout": 100,
