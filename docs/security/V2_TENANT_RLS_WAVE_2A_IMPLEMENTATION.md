@@ -152,7 +152,7 @@ Default API tests include:
 Disposable DB integration suite:
 
 ```powershell
-$env:EIP_RLS_TEST_DATABASE_URL='postgresql://user:password@localhost:5432/eip_v2_rls_test'
+$env:EIP_RLS_TEST_DATABASE_URL='postgresql://eip_v2_rls_app:<password>@localhost:5432/eip_v2_rls_test'
 npm.cmd --prefix services/api run test:tenant-rls
 ```
 
@@ -160,6 +160,10 @@ Safety guard:
 
 - The integration suite refuses non-local databases unless `EIP_RLS_TEST_ALLOW_REMOTE=true`.
 - It is intended only for disposable local PostgreSQL databases.
+- The integration suite refuses `eip_V2` and only runs against `eip_v2_rls_test`.
+- The integration suite asserts `current_user` is the URL role, non-superuser, and non-`BYPASSRLS`.
+- The integration suite asserts `tenant.tenant_settings` has RLS enabled, FORCE RLS enabled, and exactly the expected Wave 2A policy names.
+- The integration suite now covers all required DB cases: missing context, same-tenant insert/select/update/delete, cross-tenant insert/select/update/delete rejection, tenant_id reassignment rejection, COMMIT and ROLLBACK context reset, pool reuse without context leakage, safe tenant B context after tenant A reuse, FORCE RLS on the table-owner application role, and SQL-failure rollback without leaked context.
 
 ## Validator coverage
 
