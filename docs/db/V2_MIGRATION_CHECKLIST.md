@@ -37,6 +37,8 @@ Use this checklist before merging or replaying any V2 database change.
 - Confirm tenant-owned tables carry `tenant_id`.
 - Confirm unique constraints and indexes respect tenant scope.
 - Confirm RLS-ready tables have explicit policies or a documented reason for deferral.
+- Confirm tenant-owned FORCE RLS changes are added through a new forward-only migration; never edit an applied migration to retrofit policy changes.
+- Confirm runtime access to FORCE RLS tables uses transaction-local tenant context on the same database client.
 - Confirm the clone strategy remains `pg_dump` / `pg_restore` for canonical rebuilds.
 - Confirm each new or proposed table has a register entry in `docs/db/NEW_TABLE_JUSTIFICATION_REGISTER.md`.
 - Confirm each table entry states why existing governed structures are insufficient.

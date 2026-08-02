@@ -13,6 +13,8 @@ const dbAccessPattern = /\b(app|client|pool|db|prisma|repo|repository)\.(query|f
 const sqlVerbPattern = /\b(SELECT|INSERT|UPDATE|DELETE)\b/;
 const tenantScopePattern = /\b(tenantId|tenant_id|tenantScope|scopeTenant|withTenant|forTenant|tenantContext|ctx\.tenant|requestTenant|tenant\s*:\s*|orgId|accountId)\b/i;
 const globallyScopedPattern = /\b(information_schema|pg_catalog|to_regclass|schema_migrations|migration)\b|select\s+1\s+as\s+ok/i;
+const rawTenantSettingsPoolQueryPattern = /app\.db\.query\s*\([\s\S]{0,900}?tenant\.tenant_settings/i;
+const tenantSettingsRlsMigration = path.join('db', 'migrations', 'v2_0032_tenant_settings_force_rls.sql');
 
 function walk(dir) {
   const entries = [];
@@ -59,6 +61,14 @@ for (const abs of walk(root)) {
   const text = fs.readFileSync(abs, 'utf8');
   const lines = text.split(/\r?\n/);
 
+  if (rawTenantSettingsPoolQueryPattern.test(text)) {
+    failures.push({
+      file: rel,
+      line: 1,
+      message: 'tenant.tenant_settings access must use withTenantTransaction on one leased client, not pooled app.db.query',
+    });
+  }
+
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (!dbAccessPattern.test(line) && !sqlVerbPattern.test(line)) continue;
@@ -76,6 +86,34 @@ for (const abs of walk(root)) {
         file: rel,
         line: i + 1,
         message: 'possible tenant-owned query without explicit tenant scope',
+      });
+    }
+  }
+}
+
+const tenantSettingsRlsMigrationPath = path.join(root, tenantSettingsRlsMigration);
+if (!fs.existsSync(tenantSettingsRlsMigrationPath)) {
+  failures.push({
+    file: tenantSettingsRlsMigration,
+    line: 1,
+    message: 'Wave 2A tenant_settings FORCE RLS migration is missing',
+  });
+} else {
+  const migrationSql = fs.readFileSync(tenantSettingsRlsMigrationPath, 'utf8');
+  const requiredMigrationPhrases = [
+    'ALTER TABLE tenant.tenant_settings FORCE ROW LEVEL SECURITY',
+    'CREATE POLICY tenant_settings_select_isolation',
+    'CREATE POLICY tenant_settings_insert_isolation',
+    'CREATE POLICY tenant_settings_update_isolation',
+    'CREATE POLICY tenant_settings_delete_isolation',
+    'security.current_tenant_id()',
+  ];
+  for (const phrase of requiredMigrationPhrases) {
+    if (!migrationSql.includes(phrase)) {
+      failures.push({
+        file: tenantSettingsRlsMigration,
+        line: 1,
+        message: `Wave 2A tenant_settings RLS migration is missing required phrase: ${phrase}`,
       });
     }
   }

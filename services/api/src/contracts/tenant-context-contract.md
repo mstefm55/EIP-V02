@@ -69,6 +69,15 @@ The canonical shape should be stable and small:
 - DB query scoping
 - Response filtering
 
+## Database transaction rule
+
+Tenant-owned persistence that is protected by PostgreSQL RLS must run through `withTenantTransaction(pool, tenantId, callback)`.
+
+- The helper sets `app.current_tenant_id` with transaction-local scope.
+- All tenant-bound SQL in the callback must use the provided `client`.
+- Nested tenant transactions are not supported; pass the existing `client` down instead.
+- Public endpoints must not use raw query-string tenant IDs as tenant authority.
+
 ## Non-goals
 
 - This contract does not define policy logic.

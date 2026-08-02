@@ -1,8 +1,9 @@
 # V2 Tenant RLS Design
 
 Date: 2026-08-01
+Updated: 2026-08-02
 
-Status: design only. No migration was created in this wave.
+Status: design plus first implementation slice. Wave 2A implements transaction-local tenant context and FORCE RLS for `tenant.tenant_settings` only.
 
 Goal: add fail-closed PostgreSQL row-level security for tenant-owned V2 data without breaking the kernel/process/UI-engine model or production migration ledger.
 
@@ -14,9 +15,13 @@ Goal: add fail-closed PostgreSQL row-level security for tenant-owned V2 data wit
 - `current_setting('app.current_tenant_id', true)::uuid`
 - null tenant context means tenant-scoped access should fail closed
 
-RLS is currently enabled only on:
+RLS was initially enabled only on:
 
 - `security.tenant_memberships`
+- `tenant.tenant_settings`
+
+Wave 2A now forces RLS on:
+
 - `tenant.tenant_settings`
 
 The remaining tenant-owned tables currently rely mostly on application-query tenant filters.
@@ -28,7 +33,7 @@ Tables counted in this design: 21 tenant-owned or tenant-related tables across `
 | Table | Tenant column / relationship | Current application-level tenant filter | Current RLS state | Operations | Expected policy | Privileged/system exceptions | Bootstrap/onboarding considerations | API-key/EDI considerations | Migration order | Test requirements | Risk of enabling RLS |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `security.tenant_memberships` | `tenant_id` | Auth shell checks membership by tenant/principal | Enabled in `v2_0002_security_memberships.sql` | select/insert/update/delete | `tenant_id = security.current_tenant_id()` with matching `WITH CHECK` | Owner/system maintenance role only through explicit privileged transaction | Needed to establish tenant access; bootstrap must use privileged transaction or controlled onboarding context | API-key principal resolution must set tenant before membership reads | Already enabled | Existing positive and missing-context negative tests | Low, already enabled |
-| `tenant.tenant_settings` | `tenant_id` | Tenant setting reads are tenant-scoped | Enabled in `v2_0003_tenant_settings_rls.sql` | select/insert/update/delete | `tenant_id = security.current_tenant_id()` with matching `WITH CHECK` | System config jobs may use explicit tenant context per row | Tenant defaults may be inserted during controlled bootstrap | API/EDI must read only after tenant resolved | Already enabled | Existing and expanded missing-context tests | Low, already enabled |
+| `tenant.tenant_settings` | `tenant_id` | Tenant setting reads use `withTenantTransaction` in Wave 2A | Enabled in `v2_0003_tenant_settings_rls.sql`; FORCE RLS and operation policies added in `v2_0032_tenant_settings_force_rls.sql` | select/insert/update/delete | `tenant_id = security.current_tenant_id()` with matching `WITH CHECK` | System config jobs may use explicit tenant context per row | Tenant defaults may be inserted during controlled bootstrap | API/EDI must read only after tenant resolved | Implemented first slice | Unit tests plus disposable DB RLS integration script | Low, implemented in Wave 2A |
 | `eip_auth.auth_identity` | `tenant_id` | Auth routes filter by tenant/login | Not enabled | select/insert/update | Tenant-bound reads/writes require current tenant | Bootstrap identity creation via privileged onboarding context | First identity creation must set tenant context before insert | API-key identity mapping must never read across tenants | Early auth block | Login positive/negative tenant crossover tests | High: login can fail if context is not set before credential lookup |
 | `eip_auth.auth_credential` | `tenant_id`, FK to identity | Auth routes filter by tenant and identity | Not enabled | select/insert/update | Tenant-bound; secrets never selected into DTOs | TOTP/password setup via explicit context | Bootstrap password/TOTP setup must run inside tenant transaction | No direct EDI exposure | After `auth_identity` | Credential lookup, reset, TOTP tests | High: sensitive table; policy mistakes can break auth or leak hashes |
 | `eip_auth.auth_session` | `tenant_id`, FK to identity | Session loader filters by tenant/session hash where available | Not enabled | select/insert/update/delete | Tenant-bound; session lookup must set context after safe session token lookup or use a controlled lookup function | Session cleanup job with explicit tenant batch context | Bootstrap session must set tenant context after tenant is known | API-key realm must not create human session bypass | After auth context helper | Session load/revoke/logout tests, missing context tests | High: bootstrapping tenant context from a session row needs careful design |
@@ -57,10 +62,10 @@ Non-tenant registry tables:
 
 ## Request and transaction model
 
-All tenant-bound API execution should use a single shared helper, conceptually:
+All tenant-bound API execution should use a single shared helper. Wave 2A implements this as `services/api/src/db/tenantTransaction.js`:
 
 ```txt
-withTenantTransaction(tenantId, callback)
+withTenantTransaction(pool, tenantId, callback)
   BEGIN
   SELECT set_config('app.current_tenant_id', tenantId, true)
   callback(client)
@@ -75,6 +80,7 @@ Requirements:
 - Missing tenant context for tenant-owned tables must fail closed.
 - Route handlers must not use ad hoc `pool.query(...)` for tenant-bound data after RLS is enabled.
 - The helper should reject empty, malformed, or unauthorized tenant IDs before starting tenant-bound work.
+- Nesting rule: nested tenant transactions are not supported. Tenant-bound routines that are already inside a tenant transaction must accept and reuse the provided `client` instead of calling `withTenantTransaction` again.
 
 ## Tenant resolution sequence
 
@@ -101,6 +107,8 @@ Public endpoints must not set tenant context from arbitrary request fields. They
 - Use DTOs rather than raw database rows.
 - Avoid using `/api/public` metadata as a backdoor into `/api/eip` tenant-owned surfaces.
 
+Wave 2A applies this to owner-shell tenant settings: public UI surface routes no longer use a raw query-string `tenant_id` as tenant context. They may resolve tenant context through the approved public `tenant_code` handle, while private routes use the authenticated session tenant.
+
 ## API-key / EDI considerations
 
 API-key or EDI flows must:
@@ -113,8 +121,8 @@ API-key or EDI flows must:
 
 ## Migration order proposal
 
-1. Add shared transaction helper and tests using existing RLS-enabled tables.
-2. Wrap current tenant-bound routes/services with the helper.
+1. Add shared transaction helper and tests using existing RLS-enabled tables. Implemented in Wave 2A.
+2. Wrap current tenant-bound routes/services with the helper for the selected table group. Wave 2A wraps `tenant.tenant_settings` owner-shell reads.
 3. Enable RLS for auth identity/credential/session/device/OTP tables with careful session bootstrap design.
 4. Enable RLS for core process tables in dependency order: agent, service object, parties, process definitions, bindings, templates, instances, tasks, events.
 5. Enable taxonomy/list RLS, with special handling for nullable/global dropdown lists and indirect `dropdown_value` tenancy.
@@ -140,13 +148,23 @@ Each table needs at least:
 - Risk: background jobs silently bypass or fail. Mitigation: require tenant-loop helper and tests for missing context.
 - Risk: production data access breaks. Mitigation: implement in a dedicated wave with staging replay, no production DB mutation during design.
 
-## Explicit non-actions in this wave
+## Wave 2A implementation status
 
-- No migration was created.
-- No SQL was changed.
+- New migration: `db/migrations/v2_0032_tenant_settings_force_rls.sql`.
+- Helper: `services/api/src/db/tenantTransaction.js`.
+- First table group: `tenant.tenant_settings` only.
+- Existing migration history was not edited.
+- No new tables were created.
 - No production database was accessed.
-- No RLS policy was added beyond existing migrations.
 - No seed was run.
+
+## Explicit non-actions still in force
+
+- No auth table RLS yet.
+- No process table RLS yet.
+- No `dropdown_list` / `dropdown_value` RLS yet.
+- No `ui_surface` RLS yet.
+- No privileged/system cross-tenant bypass path yet.
 
 ## Drift check
 

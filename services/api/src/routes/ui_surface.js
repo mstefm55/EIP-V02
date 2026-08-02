@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { withTenantTransaction } from "../db/tenantTransaction.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -149,21 +150,23 @@ function mergeThemePayload(baseTheme, overrideTheme) {
   return sanitizeThemePayload(merged, base);
 }
 
-async function fetchTenantSetting(app, { tenantId, settingKey }) {
+export async function fetchTenantSetting(app, { tenantId, settingKey }) {
   if (!tenantId) return null;
   const key = normalizeOptionalText(settingKey);
   if (!key) return null;
 
-  const result = await app.db.query(
-    `
-    SELECT setting_value, updated_at
-    FROM tenant.tenant_settings
-    WHERE tenant_id = $1
-      AND setting_key = $2
-      AND setting_status = 'active'
-    LIMIT 1
-    `,
-    [tenantId, key]
+  const result = await withTenantTransaction(app.db, tenantId, (client, context) =>
+    client.query(
+      `
+      SELECT setting_value, updated_at
+      FROM tenant.tenant_settings
+      WHERE tenant_id = $1
+        AND setting_key = $2
+        AND setting_status = 'active'
+      LIMIT 1
+      `,
+      [context.tenantId, key]
+    )
   );
 
   return result.rows[0] || null;
@@ -452,9 +455,9 @@ function sendWithConditionalCache(req, reply, { payload, etag, lastModified, cac
   return reply.send(payload);
 }
 
-async function resolveTenantId(app, { tenantId, tenantCode }) {
+export async function resolveTenantId(app, { tenantId, tenantCode, allowDirectTenantId = false }) {
   const directTenantId = normalizeOptionalText(tenantId);
-  if (directTenantId) return directTenantId;
+  if (allowDirectTenantId && directTenantId) return directTenantId;
 
   const code = normalizeOptionalText(tenantCode);
   if (!code) return null;
@@ -661,7 +664,6 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
       },
       async (req, reply) => {
         const tenantId = await resolveTenantId(app, {
-          tenantId: req.query?.tenant_id,
           tenantCode: req.query?.tenant_code
         });
         const realm = normalizeRealm(req.query?.realm);
@@ -704,7 +706,6 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
       async (req, reply) => {
         const code = normalizeText(req.params.code);
         const tenantId = await resolveTenantId(app, {
-          tenantId: req.query?.tenant_id,
           tenantCode: req.query?.tenant_code
         });
         const realm = normalizeRealm(req.query?.realm);

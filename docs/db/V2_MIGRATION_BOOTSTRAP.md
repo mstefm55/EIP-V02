@@ -103,6 +103,7 @@ Recommended starter files:
 - `db/migrations/v2_0001_kernel_bootstrap.sql`
 - `db/migrations/v2_0002_security_memberships.sql`
 - `db/migrations/v2_0003_tenant_settings_rls.sql`
+- `db/migrations/v2_0032_tenant_settings_force_rls.sql`
 - `db/sql/v2_consolidated_delta_draft.sql`
 - `TENANCY_MODEL.md`
 - `DB_TENANT_RULES.md`
@@ -116,6 +117,7 @@ Recommended starter files:
 - The clone strategy is documented with safety implications.
 - The delta draft is structured into exact sections.
 - The migration files are stable SQL, not placeholders.
+- Tenant-owned RLS hardening migrations are forward-only and must use the ledger; do not edit earlier applied RLS migrations to change policy shape.
 - The tenancy model is explicit, with POOL as the default and BRIDGE/SILO as future portability targets.
 - Any new/proposed table has a register entry with explicit insufficiency rationale and drift checks.
 - The migration ledger exists or is safely baselined before repeated deployment.

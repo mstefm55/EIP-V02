@@ -13,7 +13,8 @@
     "test:auth:security": "node --env-file-if-exists=.env.v2.local scripts/test_auth_security_flow.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "gate:no-downgrade": "node --env-file-if-exists=.env.v2.local scripts/no_downgrade_gate.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:tenant-rls": "node test/tenantRls.integration.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
