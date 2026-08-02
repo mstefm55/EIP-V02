@@ -1,4 +1,6 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+import { normalizeInternalApiPath } from "./apiEndpointSecurity.js";
+
+const BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
 
 class ApiError extends Error {
   constructor(status, payload, rawBody) {
@@ -18,10 +20,8 @@ function readCookie(name) {
 }
 
 function buildUrl(path) {
-  if (String(path || "").startsWith("http://") || String(path || "").startsWith("https://")) {
-    return path;
-  }
-  return `${BASE_URL}${path}`;
+  const approvedPath = normalizeInternalApiPath(path);
+  return `${BASE_URL}${approvedPath}`;
 }
 
 async function parseBody(response) {
@@ -69,6 +69,7 @@ function buildPath(path, query) {
 }
 
 async function apiFetchWithMeta(path, options = {}) {
+  const url = buildUrl(path);
   const method = normalizeMethod(options.method);
   const headers = {
     ...(options.headers || {}),
@@ -84,7 +85,7 @@ async function apiFetchWithMeta(path, options = {}) {
     if (csrf) headers["x-csrf"] = csrf;
   }
 
-  const response = await fetch(buildUrl(path), {
+  const response = await fetch(url, {
     method,
     headers,
     credentials: "include",
@@ -157,5 +158,6 @@ export {
   apiFetchWithMeta,
   buildPath,
   buildQuery,
+  buildUrl,
   describeApiError,
 };

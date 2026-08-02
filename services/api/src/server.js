@@ -28,6 +28,14 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
+function normalizeRuntimeMode(value, fallback = "development") {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "prod") return "production";
+  if (normalized === "dev") return "development";
+  return normalized;
+}
+
 function parseInteger(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -47,7 +55,13 @@ function parseCorsOrigins(value) {
 }
 
 function buildRuntimeConfig(overrides = {}) {
+  const runtimeModeRaw = process.env.NODE_ENV;
+  const runtimeMode = normalizeRuntimeMode(runtimeModeRaw, "development");
+  const runtimeModeExplicit = String(runtimeModeRaw ?? "").trim().length > 0;
   const env = {
+    NODE_ENV: runtimeMode,
+    runtimeMode,
+    runtimeModeExplicit,
     port: parseInteger(process.env.PORT, DEFAULT_PORT),
     host: process.env.HOST || DEFAULT_HOST,
     logLevel: process.env.LOG_LEVEL || "info",
@@ -121,6 +135,7 @@ function buildRuntimeConfig(overrides = {}) {
     ),
     AUTH_OTP_TTL_SEC: parseInteger(process.env.AUTH_OTP_TTL_SEC, 600),
     AUTH_OTP_MAX_ATTEMPTS: parseInteger(process.env.AUTH_OTP_MAX_ATTEMPTS, 6),
+    AUTH_OTP_RECENT_WINDOW_MIN: parseInteger(process.env.AUTH_OTP_RECENT_WINDOW_MIN, 10),
     AUTH_LOGIN_FAILURE_THRESHOLD: parseInteger(process.env.AUTH_LOGIN_FAILURE_THRESHOLD, 8),
     AUTH_LOGIN_LOCK_MIN: parseInteger(process.env.AUTH_LOGIN_LOCK_MIN, 15),
     LOG_DEV_OTP: parseBoolean(process.env.LOG_DEV_OTP, false),
@@ -134,10 +149,29 @@ function buildRuntimeConfig(overrides = {}) {
     ENABLE_PUBLIC_DB_HEALTH: parseBoolean(process.env.ENABLE_PUBLIC_DB_HEALTH, false),
   };
 
-  return {
+  const merged = {
     ...env,
     ...overrides,
     corsOrigin: overrides.corsOrigin ?? env.corsOrigin,
+  };
+  const effectiveRuntimeMode = normalizeRuntimeMode(
+    overrides.runtimeMode ?? overrides.NODE_ENV ?? merged.runtimeMode ?? merged.NODE_ENV,
+    runtimeMode
+  );
+  const hasRuntimeOverride = Object.hasOwn(overrides, "runtimeMode")
+    || Object.hasOwn(overrides, "NODE_ENV");
+  const effectiveRuntimeModeExplicit = overrides.runtimeModeExplicit
+    ?? (
+      hasRuntimeOverride
+        ? String(overrides.runtimeMode ?? overrides.NODE_ENV ?? "").trim().length > 0
+        : merged.runtimeModeExplicit
+    );
+
+  return {
+    ...merged,
+    NODE_ENV: effectiveRuntimeMode,
+    runtimeMode: effectiveRuntimeMode,
+    runtimeModeExplicit: effectiveRuntimeModeExplicit,
   };
 }
 
@@ -196,4 +230,4 @@ if (isDirectRun) {
   }
 }
 
-export { buildServer };
+export { buildRuntimeConfig, buildServer };

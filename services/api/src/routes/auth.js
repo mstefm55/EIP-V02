@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 import { generateSecret, generateURI, verify } from "otplib";
 import { verifyPassword } from "../auth/password.js";
 import { randomDigits, sha256Hex, timingSafeEqual } from "../auth/crypto.js";
+import {
+  buildOtpChallengeResponse,
+  canLogDevelopmentOtp,
+  logDevelopmentOtpIfAllowed,
+} from "../auth/otpLogging.js";
 import { sendEmail } from "../lib/email.js";
 
 const AUTH_REALM = "EIP";
@@ -158,14 +163,11 @@ function getOtpConfig(app) {
     pepper: normalizeString(
       app.config?.AUTH_OTP_PEPPER
       || app.config?.AUTH_SESSION_PEPPER
-      || process.env.AUTH_OTP_PEPPER
-      || process.env.OTP_PEPPER
-      || process.env.AUTH_SESSION_PEPPER
     ),
-    ttlSeconds: parseInteger(app.config?.AUTH_OTP_TTL_SEC ?? process.env.AUTH_OTP_TTL_SEC, DEFAULT_OTP_TTL_SECONDS),
-    maxAttempts: parseInteger(app.config?.AUTH_OTP_MAX_ATTEMPTS ?? process.env.AUTH_OTP_MAX_ATTEMPTS, DEFAULT_OTP_MAX_ATTEMPTS),
+    ttlSeconds: parseInteger(app.config?.AUTH_OTP_TTL_SEC, DEFAULT_OTP_TTL_SECONDS),
+    maxAttempts: parseInteger(app.config?.AUTH_OTP_MAX_ATTEMPTS, DEFAULT_OTP_MAX_ATTEMPTS),
     recentWindowMinutes: parseInteger(
-      app.config?.AUTH_OTP_RECENT_WINDOW_MIN ?? process.env.AUTH_OTP_RECENT_WINDOW_MIN,
+      app.config?.AUTH_OTP_RECENT_WINDOW_MIN,
       DEFAULT_OTP_RECENT_WINDOW_MIN
     ),
   };
@@ -174,11 +176,11 @@ function getOtpConfig(app) {
 function getLoginSecurityConfig(app) {
   return {
     failureThreshold: parseInteger(
-      app.config?.AUTH_LOGIN_FAILURE_THRESHOLD ?? process.env.AUTH_LOGIN_FAILURE_THRESHOLD,
+      app.config?.AUTH_LOGIN_FAILURE_THRESHOLD,
       DEFAULT_LOGIN_FAILURE_THRESHOLD
     ),
     lockMinutes: parseInteger(
-      app.config?.AUTH_LOGIN_LOCK_MIN ?? process.env.AUTH_LOGIN_LOCK_MIN,
+      app.config?.AUTH_LOGIN_LOCK_MIN,
       DEFAULT_LOGIN_LOCK_MINUTES
     ),
   };
@@ -242,7 +244,7 @@ async function clearFailedLoginAttemptState(app, { tenantId, identityId }) {
 }
 
 function getTotpSecretKey(app) {
-  const raw = normalizeString(app.config?.AUTH_TOTP_SECRET_KEY || process.env.AUTH_TOTP_SECRET_KEY || process.env.TOTP_SECRET_KEY);
+  const raw = normalizeString(app.config?.AUTH_TOTP_SECRET_KEY);
   if (!raw || !/^[0-9a-fA-F]{64}$/.test(raw)) {
     return null;
   }
@@ -250,7 +252,7 @@ function getTotpSecretKey(app) {
 }
 
 function getTotpIssuer(app) {
-  return normalizeString(app.config?.AUTH_TOTP_ISSUER || process.env.AUTH_TOTP_ISSUER || process.env.TOTP_ISSUER || "EIP");
+  return normalizeString(app.config?.AUTH_TOTP_ISSUER || "EIP");
 }
 
 function encryptTotpSecret(secret, keyBuffer) {
@@ -293,6 +295,13 @@ function resolveOtpRecipient(identity, login) {
     return login;
   }
   return null;
+}
+
+async function deliverOtpEmail(app, recipient, subject, text, html) {
+  if (typeof app.otpDelivery?.sendEmail === "function") {
+    return app.otpDelivery.sendEmail(app, recipient, subject, text, html);
+  }
+  return sendEmail(app, recipient, subject, text, html);
 }
 
 function isPrivilegedIdentity(identity) {
@@ -554,13 +563,17 @@ export default async function authRoutes(app) {
         const text = `Your EIP one-time code is ${otp}. It expires in ${otpExpiresMin} minutes.`;
         const html = `<p>Your EIP one-time code is <strong>${otp}</strong>.</p><p>It expires in ${otpExpiresMin} minutes.</p>`;
 
-        const isDevLogAllowed = app.config?.LOG_DEV_OTP === true && app.config?.NODE_ENV !== "production";
+        const isDevLogAllowed = canLogDevelopmentOtp(app.config);
 
         try {
-          if (isDevLogAllowed) {
-            request.log.info({ event: "dev_otp", challenge_id: challengeId, otp, recipient });
-          }
-          await sendEmail(app, recipient, subject, text, html);
+          logDevelopmentOtpIfAllowed({
+            config: app.config,
+            logger: request.log,
+            challengeId,
+            otp,
+            recipient,
+          });
+          await deliverOtpEmail(app, recipient, subject, text, html);
         } catch (deliveryError) {
           const smtpConfigured = Boolean(app.config?.SMTP_HOST && app.config?.SMTP_USER && app.config?.SMTP_PASS);
           if (!(isDevLogAllowed && !smtpConfigured)) {
@@ -581,11 +594,7 @@ export default async function authRoutes(app) {
           }
         }
 
-        return reply.send({
-          ok: true,
-          challenge_id: challengeId,
-          expires_at: expiresAt.toISOString(),
-        });
+        return reply.send(buildOtpChallengeResponse({ challengeId, expiresAt }));
       } catch (error) {
         request.log.error({ event: "request_otp_error", message: error?.message || String(error) });
         return sendFailure(reply, { status: 500, error: "OTP_UNAVAILABLE" });

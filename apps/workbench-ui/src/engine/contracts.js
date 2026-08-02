@@ -1,4 +1,5 @@
 import { buildPath, buildQuery } from "../services/apiClient.js";
+import { normalizeEipContractPath } from "../services/apiEndpointSecurity.js";
 
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -65,16 +66,17 @@ function resolveContract(contract, ctx, options = {}) {
   if (hasUnresolvedPathParam(endpoint)) {
     return null;
   }
+  const approvedEndpoint = normalizeEipContractPath(endpoint);
 
   const query = resolveValue(contract.query || {}, scopes);
   const mergedQuery = {
     ...query,
     ...(options.query || {}),
   };
-  const pathWithQuery = buildPath(endpoint, mergedQuery);
+  const pathWithQuery = normalizeEipContractPath(buildPath(approvedEndpoint, mergedQuery));
 
   return {
-    endpoint,
+    endpoint: approvedEndpoint,
     pathWithQuery,
     method: String(contract.method || "GET").toUpperCase(),
     query: mergedQuery,
