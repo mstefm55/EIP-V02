@@ -8,10 +8,11 @@ Status: Architecture and product-strategy guardrail for EIP Core V2
 
 EIP Core V2 is being built as a governed, metadata-driven kernel rather than a large fixed-table ERP schema. This creates an opportunity to commercialize focused applications before the complete platform is finished, while also creating a technical responsibility: JSONB and metadata governance must remain predictable, indexable, observable, and migratable as datasets and customers grow.
 
-This document establishes two related strategic rules:
+This document establishes three related strategic rules:
 
 1. EIP Core V2 may be commercialized through narrowly scoped, specialized applications that solve a specific operational problem before the full platform is complete.
 2. JSONB may remain a core extensibility mechanism, but performance and data integrity must be continuously validated rather than assuming that JSONB is suitable only for small datasets or, conversely, that it will scale without limits.
+3. Promotion of a governed JSONB attribute into a relational column, generated column, dedicated table, reporting table, or other persistent relational structure is never automatic. It requires explicit owner approval after a written, evidence-based architecture proposal.
 
 The target market for early specialized applications should favor solo operators, small businesses, and startups where the product can deliver immediate value with limited configuration and manageable data volumes. This is a go-to-market choice, not a hard architectural ceiling.
 
@@ -108,6 +109,8 @@ Use relational columns and relational tables for values that are important to:
 
 JSONB should reduce schema proliferation without erasing relational integrity.
 
+This design preference does not authorize an implementation agent to convert an existing governed JSONB attribute into a relational column or table on its own. Existing JSONB-to-relational promotion is an owner-controlled architecture decision under Section 5.
+
 ### 2.2 Metadata Governance Requirement
 
 JSONB is acceptable only where its structure is governed.
@@ -141,7 +144,7 @@ A large database can perform well when:
 - tenant predicates are selective;
 - frequently queried JSONB paths are indexed appropriately;
 - data is partitioned or archived where necessary;
-- relational columns carry hot operational fields;
+- relational columns carry hot operational fields where explicitly approved;
 - query plans are monitored;
 - large analytical workloads are separated from transactional workloads when needed.
 
@@ -150,6 +153,8 @@ Therefore, EIP V2 must not adopt a rule that JSONB is "for small businesses only
 > JSONB remains acceptable while measured query cost, write amplification, index size, storage growth, and operational latency stay inside defined product limits.
 
 Customer size and row count are useful signals, but actual query behavior is the architectural decision point.
+
+A performance threshold being crossed creates a review requirement, not an automatic schema-promotion authorization.
 
 ---
 
@@ -163,7 +168,9 @@ Queries filter inside JSONB without usable indexes and gradually become full-tab
 
 Guardrail:
 
-Any JSONB path used frequently in WHERE, JOIN, ORDER BY, permission logic, or operational dashboards must be reviewed for a dedicated expression index, GIN index, generated/relational column, or model change.
+Any JSONB path used frequently in WHERE, JOIN, ORDER BY, permission logic, or operational dashboards must be reviewed for the least invasive valid remedy. Review expression indexes, partial indexes, GIN indexes, query changes, bounded projections, caching, or other non-promotional optimizations before proposing a relational column or table.
+
+Any proposal for a generated/relational column or new table is subject to the explicit owner-approval gate in Section 5.
 
 ### 4.2 Oversized GIN Indexes
 
@@ -183,9 +190,7 @@ Updating a small value inside a large JSONB document can rewrite a significant t
 
 Guardrail:
 
-Frequently changing attributes should not live inside very large JSONB payloads merely to preserve a generic schema.
-
-Promote high-churn values to dedicated relational structures when measurement demonstrates the need.
+Frequently changing attributes inside very large JSONB payloads must be measured and reviewed. A high-churn attribute may become a candidate for relational promotion, but no column or table may be created for that purpose without explicit owner approval and the evidence package required in Section 5.
 
 ### 4.4 TOAST and Large Documents
 
@@ -205,13 +210,15 @@ Large-scale reporting across arbitrary JSONB attributes can become expensive and
 
 Guardrail:
 
-Operational attributes that become important reporting dimensions should be candidates for:
+Operational attributes that become important reporting dimensions should first be reviewed for:
 
-- generated columns;
-- indexed expressions;
-- materialized projections;
-- reporting tables/views;
+- expression or partial indexes;
+- query redesign;
+- bounded/materialized projections that do not change the authoritative data model;
+- caching where appropriate;
 - analytical pipelines.
+
+Generated columns, dedicated reporting tables, or other persistent relational promotion remain possible remedies, but they require explicit owner approval under Section 5 before implementation.
 
 Do not force transactional JSONB to serve every future analytical workload directly.
 
@@ -227,25 +234,151 @@ All business writes must pass through governed metadata validation. Direct free-
 
 ---
 
-## 5. Promotion Rule: When a JSONB Field Becomes a Column or Table
+## 5. Owner Approval Gate for JSONB-to-Relational Promotion
 
-A JSONB attribute should be reviewed for promotion when one or more of the following become true:
+### 5.1 Non-Automatic Promotion Rule
 
-- it participates in a foreign key relationship;
-- it becomes part of a uniqueness rule;
-- it becomes part of an RLS predicate;
+A JSONB attribute may be identified as a **promotion candidate**, but candidate status does not authorize implementation.
+
+No developer, Codex agent, automated migration, performance-tuning task, governance validator, or implementation wave may do any of the following without explicit owner approval:
+
+- add a relational column to extract or replace a governed JSONB attribute;
+- add a generated/stored column derived from a governed JSONB attribute;
+- create a dedicated table for a governed JSONB attribute or group of attributes;
+- create a persistent reporting/projection table that changes the authoritative storage model;
+- move an existing governed value out of JSONB;
+- remove the JSONB representation after a proposed relational migration;
+- introduce dual-write/backfill logic for such a promotion.
+
+A performance concern, scale threshold, integrity opportunity, or developer preference is not by itself approval.
+
+The required state before owner approval is:
+
+**PROMOTION CANDIDATE — OWNER DECISION REQUIRED**
+
+### 5.2 Signals That May Trigger a Promotion Proposal
+
+A JSONB attribute may be brought forward for owner review when one or more of the following become true:
+
+- it participates in a proposed foreign-key relationship;
+- it becomes part of a proposed uniqueness rule;
+- it appears necessary for an RLS predicate;
 - it is queried in a large percentage of requests;
 - it is sorted or aggregated frequently;
 - it is updated much more frequently than the surrounding document;
 - it becomes financially or legally significant;
-- it requires strict database-level typing or constraints;
+- strict database-level typing or constraints would materially reduce risk;
 - it appears in most records of the entity type;
-- it creates a measurable query-plan or index-cost problem;
-- it needs referential integrity with another governed object.
+- it creates a measurable query-plan, WAL, bloat, storage, or index-cost problem;
+- it needs referential integrity with another governed object;
+- measured performance cannot be brought inside the agreed budget with less invasive methods.
 
-Promotion must not be treated as architectural failure. It is the intended evolution path from flexible metadata to stable high-value schema.
+These are proposal triggers only. None is an automatic migration rule.
 
-The metadata contract should support migration/versioning so promoted fields do not create breaking application drift.
+### 5.3 Mandatory Argumentation Before Approval Is Requested
+
+Any recommendation to promote a JSONB attribute must be presented to the owner before code or migration work begins and must include, at minimum:
+
+1. **Current governed field**
+   - JSONB path/key;
+   - owning table/entity;
+   - metadata schema/version;
+   - current validation rules.
+2. **Measured problem**
+   - representative row counts;
+   - tenant distribution;
+   - query frequency;
+   - p50/p95/p99 where relevant;
+   - `EXPLAIN (ANALYZE, BUFFERS)` evidence where practical;
+   - rows scanned versus returned;
+   - index/storage/WAL/bloat evidence where relevant.
+3. **Why action is needed now**
+   - concrete current or near-term failure/risk;
+   - why leaving the field in governed JSONB is no longer adequate.
+4. **Alternatives considered first**
+   - expression index;
+   - partial index;
+   - selective GIN index;
+   - query rewrite;
+   - DTO/projection reduction;
+   - cache;
+   - archival/retention adjustment;
+   - analytical/offline projection;
+   - other non-schema remedies.
+5. **Why those alternatives are insufficient**
+   - evidence, not preference.
+6. **Proposed relational design**
+   - column/table definition;
+   - key/constraint/index design;
+   - tenant ownership and RLS implications;
+   - relationship to the existing metadata contract.
+7. **Migration plan**
+   - backfill method;
+   - compatibility period;
+   - dual-read/dual-write requirement if any;
+   - cutover method;
+   - rollback/recovery approach;
+   - handling of old metadata versions.
+8. **Application compatibility**
+   - DTO/API impact;
+   - process/effect/document impact;
+   - UI metadata impact;
+   - external integration impact.
+9. **Expected benefit**
+   - measurable performance/integrity improvement expected;
+   - expected operating-cost impact.
+10. **Risks and cost**
+    - migration risk;
+    - additional schema complexity;
+    - maintenance cost;
+    - reduced flexibility;
+    - lock/deployment risk;
+    - future reversibility.
+11. **Recommendation**
+    - keep JSONB;
+    - optimize JSONB without promotion;
+    - promote to a column;
+    - promote to a dedicated table;
+    - defer decision until more evidence exists.
+
+The proposal must make the trade-off understandable enough for the owner to make the architectural decision deliberately.
+
+### 5.4 Owner Decision Is the Gate
+
+Implementation may proceed only after explicit owner approval of the specific proposal.
+
+Approval of one field does not authorize promotion of other fields.
+
+A general statement such as "optimize performance" or "make the schema scalable" is not approval to add columns or tables.
+
+If the owner declines or defers promotion, the implementation must preserve the governed JSONB model and use an approved non-promotional remedy or accept the measured limit until the decision is revisited.
+
+### 5.5 New-Table Justification Does Not Replace Owner Approval
+
+The existing EIP new-table justification process remains mandatory for any proposed new table, but it is a second governance gate, not a substitute for owner approval.
+
+The sequence is:
+
+1. detect and measure the problem;
+2. prepare the evidence-based promotion proposal;
+3. obtain explicit owner approval;
+4. if a new table is approved, complete the New Table Justification Register entry;
+5. design the forward-only migration and tests;
+6. perform implementation through the normal review/deployment gates.
+
+### 5.6 Architecture Decision Record
+
+Any approved promotion should be recorded in the relevant architecture/governance documentation with:
+
+- the approved field/path;
+- decision date;
+- approved target structure;
+- evidence summary;
+- alternatives rejected;
+- compatibility/migration approach;
+- reference to the owner approval.
+
+This creates an auditable record and prevents later developers from treating relational promotion as an informal default.
 
 ---
 
@@ -284,9 +417,11 @@ Architecture response:
 
 - monitor slow queries;
 - introduce selective JSONB indexes;
-- promote hot attributes;
+- optimize query shape;
+- identify hot attributes as promotion candidates where evidence supports review;
+- seek owner approval before any relational promotion;
 - archive completed operational history where appropriate;
-- introduce purpose-built projections for common reporting.
+- introduce approved purpose-built projections for common reporting where needed.
 
 ### Stage C — Mid-Market / Large Dataset
 
@@ -299,7 +434,7 @@ Characteristics:
 
 Architecture response may include:
 
-- further relational promotion;
+- evidence-based relational-promotion proposals subject to owner approval;
 - table partitioning;
 - read replicas;
 - caching;
@@ -408,6 +543,8 @@ Suggested starting engineering targets for ordinary transactional operations und
 
 These are engineering guardrails, not contractual customer SLAs.
 
+Crossing a budget triggers diagnosis and a proposal. It does not automatically authorize relational promotion.
+
 ---
 
 ## 10. Specialized App Architecture Rule
@@ -425,7 +562,8 @@ Every specialized product built on V2 should identify:
 - retention requirements;
 - external integration volume;
 - performance budget;
-- likely relational-promotion candidates.
+- likely JSONB optimization candidates;
+- any possible relational-promotion candidates, clearly marked as requiring owner approval before implementation.
 
 This review should happen before public deployment and again when usage crosses meaningful growth thresholds.
 
@@ -468,15 +606,17 @@ Before onboarding a materially larger tenant, assess:
 7. integration/event throughput;
 8. storage growth;
 9. RLS selectivity;
-10. ability to promote hot metadata fields without breaking contracts.
+10. whether hot metadata fields may eventually require an owner-approved relational-promotion proposal.
 
 Classify the customer/workload as:
 
 - supported by current architecture;
-- supported with indexing/projection changes;
-- supported after a defined relational promotion;
+- supported with JSONB indexing/query/projection changes;
+- potentially supported after an owner-reviewed relational-promotion proposal;
 - requires a higher-scale deployment topology;
 - currently outside product limits.
+
+No customer classification may be used as implicit authorization to create a new relational column or table.
 
 This is more accurate than using employee count alone.
 
@@ -498,7 +638,8 @@ Specialized applications must continue to preserve:
 - migration immutability;
 - new-table justification;
 - schema/version governance for dynamic data;
-- fail-closed security behavior.
+- fail-closed security behavior;
+- explicit owner approval before JSONB-to-relational promotion.
 
 Commercial urgency is not justification for bypassing these controls.
 
@@ -510,16 +651,17 @@ Before implementation approval, ask:
 
 - Is the business problem narrow and commercially understandable?
 - Can existing kernel structures model it without unnecessary new tables?
-- Which fields belong relationally?
+- Which new fields are integrity-critical from inception and therefore genuinely belong relationally?
 - Which fields legitimately belong in governed JSONB?
 - Which JSONB paths will be queried frequently?
-- Are those paths indexed or intentionally promoted?
+- Can those paths remain in JSONB with expression/partial/GIN indexes or query improvements?
 - What happens at 10x and 100x the expected starting dataset?
 - Is the largest-tenant case acceptable?
 - Are list APIs paginated and bounded?
 - Are JSONB payloads projected through DTOs rather than returned wholesale?
 - Are performance-relevant fields visible to observability tooling?
-- Is there a migration path if a JSONB attribute becomes operationally critical?
+- If an existing JSONB attribute appears to need relational promotion, has the full Section 5 evidence package been prepared?
+- Has explicit owner approval been obtained for that specific promotion before any migration/code work?
 - Does tenant isolation remain fail closed?
 - Does the specialized application reuse governed process/effect/document authority rather than introducing application-specific hidden rules?
 
@@ -535,6 +677,8 @@ The preferred V2 direction is:
 
 Targeting solo operators, small businesses, and startups is a sensible early revenue strategy because it reduces deployment complexity and gives EIP real-world validation sooner. However, this should not be confused with a technical claim that PostgreSQL JSONB only works for small datasets.
 
-The permanent architecture rule is to keep flexible data governed, measure real workload behavior, index deliberately, promote hot attributes when justified, and introduce higher-scale database patterns only when actual usage requires them.
+The permanent architecture rule is to keep flexible data governed, measure real workload behavior, index and query deliberately, and introduce higher-scale database patterns only when actual usage requires them.
 
-This allows EIP to avoid premature enterprise complexity while preserving a credible path from focused specialist applications to larger operational workloads.
+Relational promotion is one possible evolution mechanism, but it is deliberately owner-controlled. Measurements may trigger a promotion proposal; they do not authorize a promotion. Before any existing JSONB field is moved to a column or table, the owner must receive the evidence, alternatives, migration impact, risks, and expected benefit and explicitly approve that specific change.
+
+This allows EIP to avoid both uncontrolled JSONB growth and premature relational schema proliferation while preserving a credible path from focused specialist applications to larger operational workloads.
