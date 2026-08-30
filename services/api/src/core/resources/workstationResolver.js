@@ -1,4 +1,5 @@
 import { resolveCapacitySlot } from "../temporal/capacitySlotResolver.js";
+import { resolveCandidateWorkDuration } from "./workRequirementResolver.js";
 
 const DEFAULT_MAX_CANDIDATES = 500;
 
@@ -44,15 +45,21 @@ export function resolveWorkstationCandidates(candidates, requirement = {}, optio
 export function resolveWorkstationAvailability(candidates, requirement = {}, scheduling = {}, options = {}) {
   const eligible = resolveWorkstationCandidates(candidates, requirement, options);
   const results = [];
+  const workRequirement = scheduling.work_requirement || scheduling.workRequirement || {};
 
   for (const candidate of eligible) {
     const calendarLayers = candidate.calendar_layers || candidate.calendars;
     if (!Array.isArray(calendarLayers) || calendarLayers.length === 0) continue;
+
+    const work = resolveCandidateWorkDuration(candidate, workRequirement, {
+      fallback_duration_minutes: scheduling.duration_minutes
+    });
+
     const slot = resolveCapacitySlot({
       calendar_layers: calendarLayers,
       reservations: candidate.reservations || [],
       anchor: scheduling.anchor,
-      duration_minutes: scheduling.duration_minutes,
+      duration_minutes: work.duration_minutes,
       direction: scheduling.direction || "FORWARD",
       allow_split: scheduling.allow_split === true,
       max_search_days: scheduling.max_search_days,
@@ -60,7 +67,7 @@ export function resolveWorkstationAvailability(candidates, requirement = {}, sch
       max_segments: scheduling.max_segments
     });
     if (!slot) continue;
-    results.push({ candidate, slot });
+    results.push({ candidate, work, slot });
   }
 
   const direction = String(scheduling.direction || "FORWARD").trim().toUpperCase();
