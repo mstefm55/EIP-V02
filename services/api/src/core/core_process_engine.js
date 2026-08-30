@@ -1,6 +1,10 @@
 // services/api/src/core/core_process_engine.js
 import { randomUUID } from "crypto";
 import { sha256Hex } from "../auth/crypto.js";
+import {
+  executeProcessMacroReasoning,
+  resolveCalculatedRef
+} from "./reasoning/processMacroBridge.js";
 
 const TASK_STATUS_LIST_CODE = "TASK_STATUS";
 const DEFAULT_SO_STATUS_LIST_CODE = "SERVICE_OBJECT_STATUS";
@@ -284,6 +288,9 @@ function resolveRef(value, ctx, payload) {
     return ctx.createdServiceObjects?.[ctx.createdServiceObjects.length - 1] || null;
   }
   if (typeof value === "string") {
+    if (value === "$calc" || value.startsWith("$calc.")) {
+      return resolveCalculatedRef(value, ctx.calc || {});
+    }
     const payloadMatch = value.match(/^\$payload\.(.+)$/);
     if (payloadMatch) return getPayloadPath(payload, payloadMatch[1]);
     const match = value.match(/^\$created\.(.+)$/);
@@ -2610,6 +2617,21 @@ async function advanceInstance(client, opts) {
       ? { ...(payload || {}), _macro_params: macroParams }
       : payload || {};
 
+  const reasoningResult = await executeProcessMacroReasoning(client, {
+    tenantId,
+    serviceObjectId: inst.service_object_id,
+    serviceObject: ctx.serviceObject,
+    macro: macroResolution.macro,
+    input: executionPayload,
+    policy: macroResolution.macro?.policy || {},
+    context: {
+      process_instance_id: inst.id,
+      process_def_id: inst.process_def_id,
+      service_object_id: inst.service_object_id
+    }
+  });
+  ctx.calc = reasoningResult.calc || {};
+
   const effectsApplied = await applyEffects(
     client,
     ctx,
@@ -2628,6 +2650,16 @@ async function advanceInstance(client, opts) {
     macro_code: macroResolution.macro_code,
     macro_source: macroResolution.macro_source,
     macro_params: macroParams,
+    ...(reasoningResult.executed
+      ? {
+          calculation: {
+            calc_digest: reasoningResult.calc_digest,
+            parent_attr_paths: reasoningResult.parent_attr_paths,
+            projection_queries: reasoningResult.projection_queries,
+            audit: reasoningResult.audit
+          }
+        }
+      : {}),
     idempotency_key: idempotencyKey,
     effects_applied: effectsApplied,
     actor_agent_id: actorAgentId,
