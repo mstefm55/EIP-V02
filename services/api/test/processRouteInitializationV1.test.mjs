@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildProcessRouteFromCandidates,
   initializeAndStartProcessRoute,
+  initializeProcessRoute,
   loadProcessRouteCandidates,
   resolveAndPersistProcessRoute
 } from "../src/core/orchestration/processRouteInitialization.js";
@@ -193,7 +194,7 @@ test("route initialization refuses to overwrite an existing durable route by def
   assert.match(client.calls[0].sql, /FOR UPDATE/);
 });
 
-test("automatic initialization builds, saves and starts the first pinned process", async () => {
+test("automatic initialization resolves and saves the pinned route without starting processing", async () => {
   const client = initializationClient({
     candidates: [
       candidate({
@@ -214,32 +215,44 @@ test("automatic initialization builds, saves and starts the first pinned process
       })
     ]
   });
-  const starts = [];
 
-  const result = await initializeAndStartProcessRoute(client, {
+  const result = await initializeProcessRoute(client, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    createdAt: "2026-08-31T00:00:00.000Z",
-    startProcess: async (_client, input) => {
-      starts.push(input);
-      return { ok: true, item: { id: "pi-validate" }, reused: false };
-    }
+    createdAt: "2026-08-31T00:00:00.000Z"
   });
 
   assert.equal(result.initialization.candidate_count, 2);
   assert.equal(result.initialization.route_step_count, 2);
   assert.equal(result.snapshot.steps[0].step_code, "VALIDATE");
-  assert.equal(result.snapshot.steps[0].state, "ACTIVE");
-  assert.equal(result.snapshot.steps[0].process_instance_id, "pi-validate");
+  assert.equal(result.snapshot.steps[0].state, "PENDING");
+  assert.equal(result.snapshot.steps[0].process_instance_id, undefined);
   assert.equal(result.snapshot.steps[1].state, "PENDING");
-  assert.equal(result.action.type, "PROCESS_STARTED");
-  assert.equal(starts.length, 1);
-  assert.equal(starts[0].processDefId, "pd-validate");
-  assert.equal(client.routeSnapshot.steps[0].process_instance_id, "pi-validate");
+  assert.equal(result.action.type, "ROUTE_INITIALIZED");
+  assert.equal(client.routeSnapshot.steps[0].process_instance_id, undefined);
 
   const routeWrites = client.calls.filter((entry) =>
     String(entry.sql).includes("UPDATE eip_core.service_object")
   );
-  assert.equal(routeWrites.length, 2);
+  assert.equal(routeWrites.length, 1);
+});
+
+test("legacy initializeAndStart wrapper is compatibility-only and no longer starts a Process Instance", async () => {
+  const client = initializationClient();
+  let starts = 0;
+
+  const result = await initializeAndStartProcessRoute(client, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    startProcess: async () => {
+      starts += 1;
+      throw new Error("SHOULD_NOT_START");
+    }
+  });
+
+  assert.equal(result.action.type, "ROUTE_INITIALIZED");
+  assert.equal(result.snapshot.steps[0].state, "PENDING");
+  assert.equal(starts, 0);
 });
