@@ -1,4 +1,5 @@
 import { buildProcessRouteSnapshot } from "./processRoutePlanner.js";
+import { resolveProcessRouteApplicability } from "./processRouteApplicability.js";
 import {
   loadProcessRouteSnapshot,
   persistProcessRouteSnapshot,
@@ -53,6 +54,25 @@ function normalizeSequence(value, required, bindingId) {
   const sequence = Number(value);
   if (!Number.isFinite(sequence)) throw new Error(`ROUTE_SEQUENCE_INVALID:${bindingId}`);
   return sequence;
+}
+
+function explicitApplicabilityResolution(options = {}) {
+  if (!Object.prototype.hasOwnProperty.call(options, "applicabilityByBindingId")) return null;
+  const map = options.applicabilityByBindingId;
+  if (!map || typeof map !== "object" || Array.isArray(map)) {
+    throw new Error("ROUTE_APPLICABILITY_MAP_INVALID");
+  }
+  for (const [bindingId, value] of Object.entries(map)) {
+    if (typeof value !== "boolean") throw new Error(`ROUTE_APPLICABILITY_INVALID:${bindingId}`);
+  }
+  return {
+    source: "provided",
+    applicabilityByBindingId: map,
+    parent_attr_paths: [],
+    projection_queries: 0,
+    audit: [],
+    audit_digest: null
+  };
 }
 
 export async function loadProcessRouteCandidates(client, options = {}) {
@@ -210,7 +230,19 @@ export async function resolveAndPersistProcessRoute(client, options = {}) {
     serviceObjectType
   });
 
-  const snapshot = buildProcessRouteFromCandidates(candidates, options);
+  const applicability =
+    explicitApplicabilityResolution(options) ||
+    await resolveProcessRouteApplicability(client, candidates, {
+      ...options,
+      tenantId,
+      serviceObjectId,
+      serviceObjectType
+    });
+
+  const snapshot = buildProcessRouteFromCandidates(candidates, {
+    ...options,
+    applicabilityByBindingId: applicability.applicabilityByBindingId
+  });
   const persisted = await persistProcessRouteSnapshot(client, snapshot, {
     ...options,
     tenantId,
@@ -222,6 +254,13 @@ export async function resolveAndPersistProcessRoute(client, options = {}) {
     service_object_type: serviceObjectType,
     candidate_count: candidates.length,
     route_step_count: snapshot.steps.length,
+    applicability: {
+      source: applicability.source || "governed_reasoning",
+      parent_attr_paths: applicability.parent_attr_paths || [],
+      projection_queries: applicability.projection_queries || 0,
+      audit: applicability.audit || [],
+      audit_digest: applicability.audit_digest || null
+    },
     persistence: {
       route_digest: persisted.digest,
       route_bytes: persisted.bytes,
@@ -240,7 +279,11 @@ export async function initializeAndStartProcessRoute(client, options = {}) {
       service_object_type: initialized.service_object_type,
       candidate_count: initialized.candidate_count,
       route_step_count: initialized.route_step_count,
-      initial_route_digest: initialized.persistence.route_digest
+      initial_route_digest: initialized.persistence.route_digest,
+      applicability_source: initialized.applicability.source,
+      applicability_audit_digest: initialized.applicability.audit_digest,
+      applicability_parent_attr_paths: initialized.applicability.parent_attr_paths,
+      applicability_projection_queries: initialized.applicability.projection_queries
     }
   };
 }
