@@ -1,17 +1,6 @@
-import {
-  addWorkingMinutes,
-  nextWorkingInstant
-} from "../temporal/calendarResolver.js";
-
-const ALLOWED_POLICY_KEYS = new Set([
-  "not_before_at",
-  "delay_after_previous_minutes",
-  "working_delay_after_previous_minutes",
-  "calendar_code"
-]);
 const ALLOWED_SCHEDULE_KEYS = new Set([
-  "eligible_at",
   "planned_start_at",
+  "planned_finish_at",
   "source_code",
   "revision"
 ]);
@@ -27,206 +16,116 @@ function parseInstant(value, code) {
   return date;
 }
 
-function parseNonNegativeMinutes(value, code) {
-  if (value === null || value === undefined || value === "") return null;
-  const minutes = Number(value);
-  if (!Number.isFinite(minutes) || minutes < 0) throw new Error(code);
-  return minutes;
+function assertRouteStepBelongsToSnapshot(snapshot, step) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new Error("ROUTE_SNAPSHOT_REQUIRED");
+  }
+  const steps = Array.isArray(snapshot.steps) ? snapshot.steps : [];
+  const stepCode = normalizeText(step?.step_code);
+  if (!stepCode) throw new Error("ROUTE_STEP_CODE_REQUIRED");
+  if (!steps.some((candidate) => normalizeText(candidate?.step_code) === stepCode)) {
+    throw new Error(`ROUTE_STEP_NOT_FOUND:${stepCode}`);
+  }
 }
 
-export function normalizeRouteTemporalPolicy(value, contextCode = "<unknown>") {
+export function normalizeRouteStepSchedule(value, contextCode = "<unknown>") {
   if (value === undefined || value === null) return null;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`ROUTE_TEMPORAL_POLICY_INVALID:${contextCode}`);
+    throw new Error(`ROUTE_SCHEDULE_INVALID:${contextCode}`);
   }
+
   for (const key of Object.keys(value)) {
-    if (!ALLOWED_POLICY_KEYS.has(key)) {
-      throw new Error(`ROUTE_TEMPORAL_POLICY_FIELD_UNSUPPORTED:${key}`);
-    }
-  }
-
-  const notBefore = parseInstant(value.not_before_at, "ROUTE_NOT_BEFORE_INVALID");
-  const elapsedDelay = parseNonNegativeMinutes(
-    value.delay_after_previous_minutes,
-    "ROUTE_PREVIOUS_DELAY_INVALID"
-  );
-  const workingDelay = parseNonNegativeMinutes(
-    value.working_delay_after_previous_minutes,
-    "ROUTE_PREVIOUS_WORKING_DELAY_INVALID"
-  );
-  if (elapsedDelay !== null && workingDelay !== null) {
-    throw new Error("ROUTE_PREVIOUS_DELAY_MODE_CONFLICT");
-  }
-
-  const calendarCode = normalizeText(value.calendar_code) || null;
-  if (workingDelay !== null && !calendarCode) {
-    throw new Error("ROUTE_WORKING_DELAY_CALENDAR_REQUIRED");
-  }
-
-  return {
-    ...(notBefore ? { not_before_at: notBefore.toISOString() } : {}),
-    ...(elapsedDelay !== null ? { delay_after_previous_minutes: elapsedDelay } : {}),
-    ...(workingDelay !== null ? { working_delay_after_previous_minutes: workingDelay } : {}),
-    ...(calendarCode ? { calendar_code: calendarCode } : {})
-  };
-}
-
-function routeTemporalPolicy(step) {
-  const attrs = step?.attrs;
-  if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return null;
-  return normalizeRouteTemporalPolicy(attrs.temporal_v1, step?.step_code || "<unknown>");
-}
-
-function normalizeDynamicSchedule(step, options = {}) {
-  const map = options.scheduleByStepCode;
-  if (map === undefined || map === null) return null;
-  if (typeof map !== "object" || Array.isArray(map)) {
-    throw new Error("ROUTE_SCHEDULE_MAP_INVALID");
-  }
-
-  const raw = map[step.step_code];
-  if (raw === undefined || raw === null) return null;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`ROUTE_SCHEDULE_INVALID:${step.step_code}`);
-  }
-  for (const key of Object.keys(raw)) {
     if (!ALLOWED_SCHEDULE_KEYS.has(key)) {
       throw new Error(`ROUTE_SCHEDULE_FIELD_UNSUPPORTED:${key}`);
     }
   }
 
-  const eligibleAt = parseInstant(raw.eligible_at, `ROUTE_DYNAMIC_ELIGIBLE_AT_INVALID:${step.step_code}`);
-  const plannedStartAt = parseInstant(
-    raw.planned_start_at,
-    `ROUTE_PLANNED_START_AT_INVALID:${step.step_code}`
+  const plannedStart = parseInstant(
+    value.planned_start_at,
+    `ROUTE_PLANNED_START_AT_INVALID:${contextCode}`
   );
-  const sourceCode = normalizeText(raw.source_code) || null;
-  const revision = raw.revision === undefined || raw.revision === null
+  if (!plannedStart) {
+    throw new Error(`ROUTE_PLANNED_START_AT_REQUIRED:${contextCode}`);
+  }
+
+  const plannedFinish = parseInstant(
+    value.planned_finish_at,
+    `ROUTE_PLANNED_FINISH_AT_INVALID:${contextCode}`
+  );
+  if (plannedFinish && plannedFinish.getTime() < plannedStart.getTime()) {
+    throw new Error(`ROUTE_SCHEDULE_RANGE_INVALID:${contextCode}`);
+  }
+
+  const sourceCode = normalizeText(value.source_code) || null;
+  const revision = value.revision === undefined || value.revision === null
     ? null
-    : normalizeText(raw.revision);
+    : normalizeText(value.revision) || null;
 
   return {
-    eligibleAt,
-    plannedStartAt,
-    sourceCode,
-    revision: revision || null
+    planned_start_at: plannedStart.toISOString(),
+    ...(plannedFinish ? { planned_finish_at: plannedFinish.toISOString() } : {}),
+    ...(sourceCode ? { source_code: sourceCode } : {}),
+    ...(revision ? { revision } : {})
   };
 }
 
-function resolveCalendarLayers(policy, options = {}) {
-  const calendarCode = normalizeText(policy?.calendar_code);
-  if (!calendarCode) return { calendarCode: null, layers: null };
-
-  const map = options.calendarLayersByCode;
-  if (!map || typeof map !== "object" || Array.isArray(map)) {
-    throw new Error(`ROUTE_CALENDAR_NOT_RESOLVED:${calendarCode}`);
+export function readRouteStepSchedule(step) {
+  if (!step || typeof step !== "object" || Array.isArray(step)) {
+    throw new Error("ROUTE_STEP_REQUIRED");
   }
-  const layers = map[calendarCode];
-  if (!Array.isArray(layers) || layers.length === 0) {
-    throw new Error(`ROUTE_CALENDAR_NOT_RESOLVED:${calendarCode}`);
-  }
-  return { calendarCode, layers };
+  const stepCode = normalizeText(step.step_code) || "<unknown>";
+  return normalizeRouteStepSchedule(step.schedule_v1, stepCode);
 }
 
-function previousCompletedStep(snapshot, step) {
-  const steps = Array.isArray(snapshot?.steps) ? snapshot.steps : [];
-  const index = steps.findIndex((candidate) => candidate?.step_code === step?.step_code);
-  if (index < 0) throw new Error(`ROUTE_STEP_NOT_FOUND:${step?.step_code || "<unknown>"}`);
-  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    if (steps[cursor]?.state === "COMPLETED") return steps[cursor];
-  }
-  return null;
-}
-
-function laterConstraint(current, candidate, reason) {
-  if (!candidate) return current;
-  if (!current || candidate.getTime() > current.at.getTime()) {
-    return { at: candidate, reason };
-  }
-  return current;
-}
-
-export function resolveRouteStepTemporalEligibility(snapshot, step, options = {}) {
+export function resolveRouteStepMaturity(snapshot, step, options = {}) {
   if (!step || typeof step !== "object" || Array.isArray(step)) {
     throw new Error("ROUTE_STEP_REQUIRED");
   }
   if (step.state !== "PENDING") {
-    throw new Error(`ROUTE_TEMPORAL_STEP_STATE_INVALID:${step.step_code || "<unknown>"}:${step.state}`);
+    throw new Error(`ROUTE_MATURITY_STEP_STATE_INVALID:${step.step_code || "<unknown>"}:${step.state}`);
   }
 
-  const now = parseInstant(options.now ?? new Date(), "ROUTE_TEMPORAL_NOW_INVALID");
-  const policy = routeTemporalPolicy(step);
-  const dynamicSchedule = normalizeDynamicSchedule(step, options);
+  assertRouteStepBelongsToSnapshot(snapshot, step);
 
-  const notBefore = parseInstant(policy?.not_before_at, "ROUTE_NOT_BEFORE_INVALID");
-  const elapsedDelay = parseNonNegativeMinutes(
-    policy?.delay_after_previous_minutes,
-    "ROUTE_PREVIOUS_DELAY_INVALID"
-  );
-  const workingDelay = parseNonNegativeMinutes(
-    policy?.working_delay_after_previous_minutes,
-    "ROUTE_PREVIOUS_WORKING_DELAY_INVALID"
-  );
+  const now = parseInstant(options.now ?? new Date(), "ROUTE_MATURITY_NOW_INVALID");
+  const schedule = readRouteStepSchedule(step);
 
-  const { calendarCode, layers } = resolveCalendarLayers(policy, options);
-
-  let constraint = null;
-  constraint = laterConstraint(constraint, notBefore, "NOT_BEFORE");
-
-  if (elapsedDelay !== null || workingDelay !== null) {
-    const previous = previousCompletedStep(snapshot, step);
-    if (!previous) throw new Error(`ROUTE_PREVIOUS_COMPLETED_STEP_REQUIRED:${step.step_code}`);
-    const completedAt = parseInstant(
-      previous.completed_at,
-      `ROUTE_PREVIOUS_COMPLETION_TIME_REQUIRED:${previous.step_code}`
-    );
-    const delayedAt = elapsedDelay !== null
-      ? new Date(completedAt.getTime() + elapsedDelay * 60000)
-      : addWorkingMinutes(layers, completedAt, workingDelay, {
-          maxDays: options.maxCalendarSearchDays
-        });
-    constraint = laterConstraint(
-      constraint,
-      delayedAt,
-      elapsedDelay !== null ? "PREVIOUS_DELAY" : "PREVIOUS_WORKING_DELAY"
-    );
+  if (!schedule) {
+    return {
+      mature: false,
+      scheduled: false,
+      evaluated_at: now.toISOString(),
+      planned_start_at: null,
+      planned_finish_at: null,
+      schedule_source_code: null,
+      schedule_revision: null,
+      reason: "SCHEDULE_REQUIRED"
+    };
   }
 
-  constraint = laterConstraint(
-    constraint,
-    dynamicSchedule?.eligibleAt || null,
-    "DYNAMIC_ELIGIBILITY"
+  const plannedStart = parseInstant(
+    schedule.planned_start_at,
+    `ROUTE_PLANNED_START_AT_INVALID:${step.step_code}`
   );
-  constraint = laterConstraint(
-    constraint,
-    dynamicSchedule?.plannedStartAt || null,
-    "PLANNED_START"
+  const plannedFinish = parseInstant(
+    schedule.planned_finish_at,
+    `ROUTE_PLANNED_FINISH_AT_INVALID:${step.step_code}`
   );
 
-  let eligibleAt = constraint?.at || now;
-  let reason = constraint?.reason || (policy ? "TEMPORAL_POLICY_ELIGIBLE" : "NO_TEMPORAL_POLICY");
+  const mature = plannedStart.getTime() <= now.getTime();
 
-  if (calendarCode) {
-    const anchor = new Date(Math.max(now.getTime(), eligibleAt.getTime()));
-    const workingAt = nextWorkingInstant(layers, anchor, {
-      maxDays: options.maxCalendarSearchDays
-    });
-    if (workingAt.getTime() > eligibleAt.getTime()) {
-      eligibleAt = workingAt;
-      reason = workingAt.getTime() > now.getTime() ? "CALENDAR_CLOSED" : reason;
-    }
-  }
-
-  const eligible = eligibleAt.getTime() <= now.getTime();
   return {
-    eligible,
+    mature,
+    scheduled: true,
     evaluated_at: now.toISOString(),
-    eligible_at: eligibleAt.toISOString(),
-    planned_start_at: dynamicSchedule?.plannedStartAt?.toISOString() || null,
-    dynamic_eligible_at: dynamicSchedule?.eligibleAt?.toISOString() || null,
-    schedule_source_code: dynamicSchedule?.sourceCode || null,
-    schedule_revision: dynamicSchedule?.revision || null,
-    reason: eligible ? "ELIGIBLE" : reason,
-    calendar_code: calendarCode
+    planned_start_at: plannedStart.toISOString(),
+    planned_finish_at: plannedFinish?.toISOString() || null,
+    schedule_source_code: schedule.source_code || null,
+    schedule_revision: schedule.revision || null,
+    reason: mature ? "MATURE" : "PLANNED_START"
   };
 }
+
+// Transitional compatibility export for callers/tests that used the previous
+// temporal-gate name. The semantics are now persisted-schedule maturity only.
+export const resolveRouteStepTemporalEligibility = resolveRouteStepMaturity;
