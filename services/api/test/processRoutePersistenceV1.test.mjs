@@ -125,7 +125,26 @@ test("route initialization writes only reserved runtime namespace when absent", 
   assert.match(client.calls[1].sql, /process_route_v1/);
 });
 
-test("persisted lifecycle tick completes current process and durably starts next route step", async () => {
+test("route persistence preserves an accepted per-step schedule projection", async () => {
+  const snapshot = route();
+  snapshot.steps[0].schedule_v1 = {
+    planned_start_at: "2026-08-31T08:00:00.000Z",
+    planned_finish_at: "2026-08-31T09:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "4"
+  };
+  const client = persistenceClient({ snapshot: null });
+
+  await initializeProcessRouteSnapshot(client, snapshot, {
+    tenantId: "tenant-1",
+    serviceObjectId: "so-1"
+  });
+
+  const written = JSON.parse(client.calls[1].params[2]);
+  assert.deepEqual(written.steps[0].schedule_v1, snapshot.steps[0].schedule_v1);
+});
+
+test("persisted lifecycle tick completes current process and leaves next unscheduled route step pending", async () => {
   const first = coordinateProcessRoute(route(), { serviceObjectId: "so-1" });
   const bound = bindRouteStepInstance(first.snapshot, "VALIDATE", "pi-1");
   const client = persistenceClient({
@@ -138,24 +157,24 @@ test("persisted lifecycle tick completes current process and durably starts next
       ended_at: "2026-08-31T00:30:00.000Z"
     }
   });
-  const starts = [];
+  let starts = 0;
 
   const result = await runPersistedProcessRouteLifecycleTick(client, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    startProcess: async (_client, input) => {
-      starts.push(input);
-      return { ok: true, item: { id: "pi-2" }, reused: false };
+    now: "2026-08-31T00:30:00.000Z",
+    startProcess: async () => {
+      starts += 1;
+      throw new Error("SHOULD_NOT_START");
     }
   });
 
   assert.equal(result.snapshot.steps[0].state, "COMPLETED");
-  assert.equal(result.snapshot.steps[1].state, "ACTIVE");
-  assert.equal(result.snapshot.steps[1].process_instance_id, "pi-2");
-  assert.equal(result.action.type, "PROCESS_STARTED");
-  assert.equal(starts.length, 1);
-  assert.equal(starts[0].processDefId, "pd-plan");
+  assert.equal(result.snapshot.steps[0].completed_at, "2026-08-31T00:30:00.000Z");
+  assert.equal(result.snapshot.steps[1].state, "PENDING");
+  assert.equal(result.action.type, "WAIT_SCHEDULE");
+  assert.equal(starts, 0);
   assert.equal(
     result.persistence.storage,
     "service_object.attrs._eip_runtime.process_route_v1"
