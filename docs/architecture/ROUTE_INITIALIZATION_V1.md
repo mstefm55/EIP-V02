@@ -2,11 +2,11 @@
 
 Date: 2026-08-31
 
-Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md`, `ORCHESTRATION_V1.md`, and `ROUTE_SNAPSHOT_PERSISTENCE_V1.md`.
+Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md`, `EXECUTION_AND_ROUTE_CANON.md`, `ORCHESTRATION_V1.md`, and `ROUTE_SNAPSHOT_PERSISTENCE_V1.md`.
 
 ## 1. Purpose
 
-The route planner, coordinator, lifecycle runtime and persistence adapter are already proven independently. This slice adds the missing front of the orchestration chain: determine the bounded candidate Process Definitions for a Service Object, convert already-governed applicability/order metadata into a version-pinned route snapshot, persist it, then start the first Process Instance through the existing route runtime.
+The route planner, coordinator, lifecycle runtime and persistence adapter are already proven independently. This slice adds the missing front of the orchestration chain: determine the bounded candidate Process Definitions for a Service Object, convert governed applicability/order metadata into a version-pinned route snapshot, persist it, then hand that saved route to orchestration.
 
 Plain-English flow:
 
@@ -15,8 +15,9 @@ business object
   -> find the processes linked to this type of object
   -> keep only the processes that apply to this case
   -> put them in an explicitly governed order
-  -> save that process plan
-  -> start the first process
+  -> save that process plan on the Service Object
+  -> orchestrate the saved plan
+  -> start the first process only when its temporal/resource eligibility permits
 ```
 
 Canonical flow:
@@ -24,12 +25,12 @@ Canonical flow:
 ```text
 SERVICE OBJECT
   -> bounded PROCESS BINDING candidates
-  -> externally/governedly resolved applicability
+  -> governed applicability
   -> ROUTE PLANNER
   -> version-pinned route snapshot
   -> durable route persistence
-  -> existing route lifecycle runtime
-  -> first PROCESS INSTANCE
+  -> route lifecycle/temporal orchestration
+  -> eligible PROCESS INSTANCE
 ```
 
 ## 2. Process Binding remains an applicability mapping
@@ -66,9 +67,9 @@ This metadata must not contain transitions, arbitrary executable conditions, Jav
 
 ## 3. Applicability stays outside the route planner
 
-Per-case applicability may eventually be calculated by governed reasoning, Profile Pack policy, or another governed resolver.
+Per-case applicability is resolved by governed reasoning, Profile Pack policy, or another governed resolver.
 
-Route Initialization V1 consumes the result as plain resolved booleans keyed by binding identity. It does not invent another condition language.
+Route Initialization consumes the result as resolved booleans keyed by binding identity. It does not invent another condition language.
 
 Conceptually:
 
@@ -79,7 +80,7 @@ candidate binding
   -> route planner filters non-applicable entries
 ```
 
-When no per-case applicability result is supplied, the candidate is treated as applicable unless its static `route_v1.enabled` metadata is false.
+When no per-case applicability rule/result exists, the candidate is applicable unless its static `route_v1.enabled` metadata is false.
 
 ## 4. Ordering rule
 
@@ -109,7 +110,9 @@ Every resulting route step snapshots:
 - binding identity as bounded provenance;
 - optional task-type/priority provenance.
 
-The route then uses the existing pinned `process_def_id` when starting the Process Instance. Later metadata/profile changes do not silently rewrite an in-flight route.
+The saved route then uses the pinned `process_def_id` when a Process Instance becomes eligible to start. Later metadata/profile changes do not silently rewrite an in-flight route.
+
+Completed routes are immutable historical records. In-progress routes may change only through explicit governed route migration as defined by `EXECUTION_AND_ROUTE_CANON.md`.
 
 ## 6. Candidate query and bounds
 
@@ -138,15 +141,16 @@ The intended caller transaction is:
 ```text
 BEGIN
   -> lock/read current route projection
-  -> reject if a route already exists unless explicit replacement is authorized
+  -> reject if a route already exists unless a higher-level governed migration explicitly authorizes replacement
   -> read Service Object type
   -> read bounded candidate bindings + pinned Process Definitions
-  -> apply already-resolved applicability
+  -> apply governed applicability
   -> build ordered route snapshot
   -> persist route snapshot
-  -> run persisted route lifecycle tick
-  -> start/reuse first Process Instance
-  -> persist ACTIVE/bound route state
+  -> run route lifecycle/temporal eligibility check
+  -> start/reuse first Process Instance only if eligible now
+  -> otherwise persist waiting state
+  -> persist ACTIVE/bound state if a Process Instance starts
 COMMIT
 ```
 
@@ -158,16 +162,24 @@ Initialization fails closed when:
 
 - tenant or Service Object identity is missing;
 - Service Object does not exist;
-- route already exists and replacement was not explicitly authorized;
+- route already exists and no governed migration authorizes replacement;
 - no applicable candidate Process Definition exists;
 - candidate count exceeds the configured bound;
 - a multi-step route has missing/non-finite sequence metadata;
 - step codes collide;
 - an applicability result is not boolean;
 - route snapshot persistence validation fails;
-- first Process Instance cannot be started/reused.
+- an eligible Process Instance cannot be started/reused.
 
-## 9. No schema or engine expansion
+## 9. Current implementation-alignment note
+
+The current V1 helper `initializeAndStartProcessRoute` starts the first route step immediately through the existing lifecycle runtime, and the current lifecycle runtime starts the next route step immediately after observing completion.
+
+Under `EXECUTION_AND_ROUTE_CANON.md`, that behavior is implementation drift: completion/initialization alone does not establish temporal eligibility.
+
+The next time-aware orchestration slice must add one generic temporal/resource eligibility gate before first/next Process Instance start, reusing the existing calendar/temporal/resource primitives. No domain-specific scheduler is authorized.
+
+## 10. No schema or engine expansion
 
 This slice adds:
 
