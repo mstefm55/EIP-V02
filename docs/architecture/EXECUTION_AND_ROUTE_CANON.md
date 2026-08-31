@@ -110,6 +110,33 @@ Scheduler/temporal resolver = start/finish eligibility decision
 
 Completion of one route step does not by itself authorize immediate start of the next step.
 
+### 4.1 Dynamic scheduling is not route migration
+
+The route defines `WHAT NEXT`; the current schedule defines `WHEN`.
+
+A Service Object may remain pinned to the same route while its pending-step schedule changes many times before execution.
+
+Conceptually:
+
+```text
+pinned route
+  Validate -> Plan -> Execute -> Finish
+
+schedule revision 41
+  Execute planned 14:00
+
+current conditions change
+
+schedule revision 42
+  Execute planned 11:00
+```
+
+That is replanning, not rerouting.
+
+Likewise, when several Service Objects compete for the same governed resource/capacity, a generic scheduler/work-allocation resolver may move one object earlier and another later as current facts change. The route coordinator consumes the resulting current per-step schedule; it must not contain business-specific reasons such as material delay, production order swap, patient urgency or vehicle priority.
+
+A dynamic planned/eligible instant is therefore an observation of the current schedule revision, not immutable route history. Hard policy constraints and completed execution history remain authoritative.
+
 ---
 
 ## 5. Service Object route ownership
@@ -151,13 +178,16 @@ A normal progression is:
 ```text
 current Process Instance completes
   -> corresponding saved route step becomes COMPLETED
-  -> identify next eligible saved route step
-  -> evaluate temporal/resource eligibility
+  -> identify next saved PENDING step
+  -> obtain/recalculate its current temporal/resource schedule
+  -> evaluate start eligibility against current schedule + pinned policy
   -> start now if eligible
-     OR remain waiting until eligible
+     OR remain waiting until eligible/replanned
   -> bind/reuse Process Instance
   -> persist updated route snapshot
 ```
+
+While a route step is still `PENDING`, its current schedule may move earlier or later as governed inputs change. The route step must not be transitioned to `ACTIVE` until the current eligibility decision permits start.
 
 V1 retains one active inter-process route step at a time unless a separately approved cross-domain requirement justifies parallel route orchestration.
 
@@ -214,6 +244,8 @@ The system must not guess equivalence between old and new route steps merely fro
 
 Where an active Process Instance exists, the default safe policy is to migrate at an approved boundary, normally after the current active step completes, unless an explicitly governed immediate-migration policy proves interruption safe.
 
+Changing only the current schedule of a pending step is not a route migration. Migration is required when the pinned route itself changes: Process Definition selection/version, route-step composition/order, or other governed route identity/provenance that defines `WHAT NEXT`.
+
 ---
 
 ## 9. No hardcoded business `what`
@@ -228,7 +260,8 @@ Runtime code may implement generic mechanics such as:
 - idempotency;
 - transaction/locking behavior;
 - generic reasoning execution;
-- Effect dispatch.
+- Effect dispatch;
+- generic candidate ranking/work allocation when separately admitted.
 
 Runtime code must not contain tenant/domain branches such as:
 
@@ -237,16 +270,19 @@ if sales order then approval
 if hospital then triage
 if manufacturing then production
 if ecommerce then shipment
+if material late then swap orders
 ```
 
-Those belong in governed Process Definitions, metadata, Profile Packs, policies and reasoning inputs.
+Those belong in governed Process Definitions, metadata, Profile Packs, policies, current facts and reasoning/scheduling inputs.
 
 ---
 
 ## 10. Architecture consequence for current Wave 3 runtime
 
-Any current runtime behavior that immediately starts the next route step solely because the previous Process Instance completed is incomplete relative to this canon.
+Any runtime behavior that immediately starts the next route step solely because the previous Process Instance completed is incomplete relative to this canon.
 
-The required correction is a generic temporal eligibility gate between route-step completion and next-process start. The gate must compose the existing calendar/temporal/resource primitives rather than introducing domain-specific schedulers.
+The required correction is a generic temporal eligibility gate between route-step completion and next-process start. The gate must compose the existing calendar/temporal/resource primitives and consume current schedule projections rather than introducing domain-specific schedulers.
+
+The gate must also recalculate a pending step against current schedule input on each relevant orchestration tick; a previous `WAIT_TIME` result must not freeze derived eligibility.
 
 This is implementation alignment work, not a reason to change the canonical architecture.
