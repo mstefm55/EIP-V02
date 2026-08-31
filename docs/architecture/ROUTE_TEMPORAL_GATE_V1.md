@@ -1,247 +1,299 @@
-# EIP Route Temporal Gate V1
+# EIP Route Schedule Maturity Gate V1
 
-Date: 2026-08-31
+Date: 2026-09-01
 
-Status: Wave 3 implementation contract under `EXECUTION_AND_ROUTE_CANON.md`, `TEMPORAL_RESOURCE_V1.md`, and the existing route runtime contracts.
+Status: Wave 3 implementation contract under `EXECUTION_AND_ROUTE_CANON.md`, `TASK_EFFECT_MODEL.md`, `OPERATING_MODEL_CANON.md`, and the existing route runtime contracts.
 
 ## 1. Purpose
 
-A completed route step does not automatically authorize immediate start of the next Process Instance.
+A saved route defines `WHAT NEXT` for a Service Object. Planning/Scheduling calculates `WHEN` each pending route process should run and persists the accepted schedule back into the saved route.
 
-This slice inserts a generic temporal eligibility gate between route progression and Process Instance start. It composes the existing calendar/working-time resolver rather than creating a domain scheduler or hardcoding business operations.
-
-Plain-English flow:
+The Route Maturity Gate is deliberately narrow:
 
 ```text
-current route step completes
-  -> mark that saved step COMPLETED
-  -> inspect next saved PENDING step
-  -> recalculate current eligibility from pinned policy + current schedule facts
-  -> apply governed working calendar when referenced
-  -> start now if eligible
-     OR keep the step PENDING and return WAIT_TIME
+saved route step
+  -> read persisted schedule
+  -> if schedule missing: WAIT_SCHEDULE
+  -> if planned start is future: WAIT_TIME
+  -> if planned start has been reached: permit Process Instance start
 ```
 
-The route remains the Service Object's saved execution plan. The gate answers only `WHEN`, not business `WHAT`.
+The gate does not calculate dates, invoke calendar arithmetic, search capacity, rank resources, or perform scheduling optimization.
 
-## 2. Responsibility boundary
+Those calculations belong to the governed Planning/Scheduling Process and its Macro reasoning.
+
+## 2. Canonical order
+
+The accepted architecture is:
 
 ```text
-WHAT
-  = Process Definition / governed metadata
-
-WHAT NEXT
-  = saved route snapshot
-
-WHEN
-  = current scheduler decision + temporal gate + existing calendar/temporal resolver
-
-HOW
-  = Process Engine -> Macro -> Effects
+SERVICE OBJECT CREATED / TRIGGERED
+  -> route applicability resolution
+  -> version-pinned route persisted on Service Object
+  -> Planning/Scheduling calculates route process dates/times
+  -> Macro Effects patch accepted schedule into the saved route JSONB
+  -> Route Orchestrator observes the current persisted schedule
+  -> each route process starts when it becomes mature for execution
+  -> Process Engine executes Process Step/Task -> Macro -> reasoning + Effects -> output
 ```
 
-The temporal gate must not contain branches such as `if sales order`, `if production`, `if hospital`, or similar domain semantics.
+The route runtime consumes the schedule. It is not the scheduler.
 
-## 3. Pinned timing policy versus dynamic schedule
+## 3. Process Engine / Macro boundary
 
-The saved route may contain stable timing policy, but derived scheduling results are not frozen route truth.
+The Process Engine model remains:
 
-A route step may carry bounded policy metadata in its existing `attrs`:
+```text
+PROCESS
+  -> STEP / TASK
+  -> MACRO
+       -> logic / calculation / decision resolution
+       -> Effect 1
+       -> Effect 2
+       -> Effect n
+  -> OUTPUT / resulting state
+  -> next transition / next step
+```
+
+For Planning/Scheduling, the Macro may call the existing generic reasoning/calculation capabilities such as:
+
+- arithmetic/comparison/collection reasoning;
+- calendar/working-time functions;
+- work-requirement calculation;
+- capacity-slot resolution;
+- workstation/resource resolution;
+- a future bounded generic solver only if ordinary composition is proven insufficient.
+
+The accepted Scheduling result is then persisted through governed Object_Effects. The route runtime must not duplicate those calculations.
+
+## 4. Persisted schedule projection
+
+V1 stores the current accepted schedule on each saved route step, conceptually:
 
 ```json
 {
-  "temporal_v1": {
-    "not_before_at": "2026-09-01T08:00:00.000Z",
-    "calendar_code": "SITE_DEFAULT"
-  }
-}
-```
-
-Supported V1 policy fields are generic:
-
-```text
-not_before_at
-  policy-level absolute earliest start instant
-
-delay_after_previous_minutes
-  elapsed-minute delay after the previous completed route step
-
-working_delay_after_previous_minutes
-  working-minute delay after the previous completed route step;
-  requires calendar_code
-
-calendar_code
-  governed calendar projection identifier; when present, a step may start only at a working instant
-```
-
-`delay_after_previous_minutes` and `working_delay_after_previous_minutes` are mutually exclusive in V1.
-
-By contrast, values such as the currently calculated feasible instant or allocated/planned start may change while a step remains PENDING. They are supplied at runtime through a bounded schedule projection keyed by route step, conceptually:
-
-```json
-{
-  "STEP_CODE": {
-    "eligible_at": "2026-09-02T10:00:00.000Z",
-    "planned_start_at": "2026-09-02T13:00:00.000Z",
+  "step_code": "EXECUTE",
+  "sequence": 300,
+  "process_def_id": "...",
+  "process_code": "EXECUTE_WORK",
+  "process_version": 4,
+  "state": "PENDING",
+  "schedule_v1": {
+    "planned_start_at": "2026-09-04T08:00:00.000Z",
+    "planned_finish_at": "2026-09-04T16:00:00.000Z",
     "source_code": "CURRENT_SCHEDULE",
     "revision": "42"
   }
 }
 ```
 
-The runtime treats `source_code` as opaque provenance. It does not understand material, manufacturing, healthcare, fleet or other business meanings.
+The mutable `schedule_v1` projection is separate from pinned route identity/provenance.
 
-## 4. Dynamic recalculation rule
+Supported V1 fields are:
 
-A PENDING route step is re-evaluated against the current schedule projection whenever orchestration ticks it.
+```text
+planned_start_at
+  current accepted planned start instant; required for a scheduled step
 
-A previous `WAIT_TIME.eligible_at` is therefore an observation of the schedule at that moment, not an immutable promise written into route history.
+planned_finish_at
+  current accepted planned finish instant; optional to the maturity gate but normally produced by Scheduling
+
+source_code
+  opaque scheduling provenance code
+
+revision
+  opaque schedule revision/version identifier
+```
+
+The Route Maturity Gate interprets only `planned_start_at` for start timing. It carries the other schedule fields for provenance/inspection but does not perform planning logic with them.
+
+## 5. Unscheduled route step
+
+After route resolution the route may exist before Planning/Scheduling has written dates.
+
+An unscheduled PENDING step must fail closed:
+
+```text
+state = PENDING
+action = WAIT_SCHEDULE
+```
+
+It must not start merely because the route exists.
+
+This enforces the canonical order:
+
+```text
+route resolved
+  -> schedule calculated/persisted
+  -> operational route execution
+```
+
+## 6. Maturity rule
+
+For a PENDING route step with an accepted `schedule_v1`:
+
+```text
+now < planned_start_at
+  -> WAIT_TIME
+
+now >= planned_start_at
+  -> route step is temporally mature
+  -> normal route coordinator may transition it ACTIVE and start/bind its pinned Process Instance
+```
+
+This V1 maturity gate is intentionally simple. It does not invent freeze rules, emergency overrides, capacity revalidation, critical-path policy, material logic, or other scheduling semantics.
+
+Any additional release condition must first be classified correctly as one of:
+
+- route state/dependency mechanic;
+- governed Process/transition condition;
+- Planning/Scheduling policy;
+- future separately approved generic maturity constraint.
+
+It must not be hidden inside route runtime.
+
+## 7. Dynamic replanning
+
+A pending route step's schedule may move earlier or later without route migration.
 
 Conceptually:
 
 ```text
-tick 1
-  current schedule says 14:00
-  -> WAIT_TIME 14:00
+route remains pinned
 
-dynamic conditions change
-  -> governed scheduler recomputes
+schedule revision 41
+  STEP_B planned 14:00
 
-tick 2
-  current schedule says 11:00
-  -> eligibility is recalculated from 11:00
+conditions change
+  -> normal planning cycle OR emergency replanning trigger
+  -> same governed Scheduling process executes again
+  -> accepted revision 42 is patched into the route
+
+schedule revision 42
+  STEP_B planned 11:00
 ```
 
-The reverse is also valid: a previously early planned start may move later when current constraints require it.
+The Route Orchestrator does not receive an external transient schedule map. It reads the latest persisted `schedule_v1` from the Service Object route snapshot on each persisted tick.
 
-This does not require route migration because the Process sequence/version has not changed. Route migration is for changing the pinned execution route. Replanning changes `WHEN`, not `WHAT NEXT`.
+A previous `WAIT_TIME` result is merely an observation. The next persisted route read may contain a different schedule revision.
 
-## 5. Cross-object reprioritization
+## 8. Normal planning versus emergency scheduling
 
-Reordering two different Service Objects because capacity, material availability, urgency, resource availability or another governed condition changed is a scheduler/work-allocation decision across candidate work.
+Scheduling is a subprocess of Planning and normally runs according to the Planning cycle.
 
-Example only:
+The same Scheduling process can also be triggered independently when a governed exception/emergency requires replanning.
 
 ```text
-Object A was planned first
+NORMAL
+Planning cycle
+  -> Scheduling subprocess
+
+EMERGENCY
+exception/replanning trigger
+  -> same Scheduling process
+```
+
+Do not create `EmergencyScheduler`, `MaterialDelayScheduler`, `FleetScheduler`, or equivalent domain engines.
+
+The difference is the trigger, scope and governed inputs/policies.
+
+## 9. Cross-object reprioritization
+
+Cross-object sequencing is a Planning/Scheduling concern, not a route-runtime concern.
+
+For example:
+
+```text
+Object A was planned earlier
 Object B was planned later
 current governed facts change
-scheduler recalculates
-Object B receives the earlier feasible slot
-Object A receives the later slot
+Scheduling recalculates affected scope
+Object B receives earlier dates
+Object A receives later dates
+Effects patch both accepted route schedules
 ```
 
-The route runtime must not contain a special `material late`, `swap production orders`, `patient priority`, `vehicle priority`, or similar domain branch.
+The route runtime simply enforces each Service Object's latest persisted route schedule.
 
-The generic boundary is:
+It must not contain branches such as `material late`, `swap production orders`, `patient priority`, `vehicle priority`, or similar domain semantics.
+
+## 10. Calendar/capacity/resource boundary
+
+The existing temporal/resource capabilities remain valid and reusable. Their architectural placement is corrected:
 
 ```text
-current governed facts + pending work + resources/capacity + policy
-  -> scheduler/work-allocation resolution
-  -> current per-step schedule projection
-  -> temporal gate
-  -> Process start when eligible
+Planning/Scheduling Macro reasoning
+  -> calendar functions
+  -> capacity-slot functions
+  -> workstation/resource functions
+  -> other admitted generic reasoning
+  -> calculated schedule
+  -> Effects persist accepted schedule
 ```
 
-The current V1 temporal gate consumes the resolved schedule projection. It does not implement a cross-object optimization engine inside the route coordinator.
-
-## 6. Calendar resolution
-
-Wave 2 deliberately did not create a calendar persistence table. Therefore this gate consumes calendar layers as already-resolved governed projections keyed by `calendar_code`.
-
-Conceptually:
+Not:
 
 ```text
-route step calendar_code
-  -> governed calendar projection supplied by caller/runtime integration
-  -> existing calendarResolver
-  -> working-time eligibility
+Route Orchestrator
+  -> calendar
+  -> capacity
+  -> calculate schedule
 ```
 
-If a referenced calendar cannot be resolved, the gate fails closed.
+Therefore the Route Maturity Gate no longer accepts caller-supplied calendar layers or caller-supplied dynamic schedule projections.
 
-This preserves the future ability to resolve calendar layers from tenant/site/workstation/resource metadata without duplicating those rules inside route code.
+## 11. Completion timestamp
 
-## 7. Eligibility calculation
+When a bound Process Instance reaches `completed`, its `ended_at` may continue to be recorded as the route step's bounded `completed_at` orchestration fact.
 
-The gate recalculates the earliest applicable constraint from the current inputs:
+That is actual execution history, not planned schedule.
 
 ```text
-pinned policy not_before_at
-previous-step completion + elapsed delay
-previous-step completion + working-time delay
-current dynamic eligible_at
-current dynamic planned_start_at
-current working-calendar availability
+schedule_v1.planned_finish_at
+  = plan
+
+completed_at
+  = actual route execution fact
 ```
 
-When several constraints apply, the latest effective start constraint wins.
+The two must remain distinct.
 
-If the step is not yet eligible:
+## 12. Route migration compatibility
+
+Changing only `schedule_v1` on pending work is replanning, not route migration.
+
+Route migration is required only when the pinned `WHAT NEXT` changes, including Process Definition/version selection, route-step composition/order, or route identity/provenance.
+
+Completed route history remains immutable.
+
+## 13. Refactor consequence for the previous temporal-gate implementation
+
+The previous implementation incorrectly allowed route runtime to derive eligibility from:
+
+- `not_before_at` policy;
+- previous-step elapsed delay;
+- previous-step working delay;
+- calendar resolution;
+- caller-provided dynamic schedule maps.
+
+That placed Scheduling responsibility inside route orchestration.
+
+This contract supersedes that behavior.
+
+Wave 3 route runtime must now only:
 
 ```text
-state stays PENDING
-action = WAIT_TIME
+read persisted schedule
+  -> WAIT_SCHEDULE when absent
+  -> WAIT_TIME until planned_start_at
+  -> start when mature
 ```
 
-The coordinator does not transition the step to ACTIVE until the temporal gate allows start.
+Any future scheduling sophistication belongs to the Planning/Scheduling Process and its Macro reasoning, not this gate.
 
-If no static temporal policy and no dynamic schedule projection exists, behavior remains backward compatible and the step may start immediately.
+## 14. No architecture expansion
 
-## 8. Completion timestamp
-
-When a bound Process Instance reaches `completed`, its `ended_at` becomes the route step's bounded `completed_at` orchestration timestamp.
-
-This timestamp is not a replacement for Process Instance history. It exists so later route steps can resolve generic dependency timing without re-querying or rewriting historical Process Instances.
-
-A completed Process Instance without a completion timestamp is treated as inconsistent and fails closed in this V1 integration.
-
-## 9. WAIT_TIME action
-
-A non-eligible step returns a bounded action such as:
-
-```json
-{
-  "type": "WAIT_TIME",
-  "service_object_id": "...",
-  "step_code": "PLAN",
-  "eligible_at": "2026-09-01T08:00:00.000Z",
-  "reason": "PLANNED_START"
-}
-```
-
-`WAIT_TIME` is orchestration output, not a new persisted route state. The route step remains `PENDING`.
-
-Because the schedule is dynamic, the next tick may return a different `eligible_at` without changing the route definition or migrating the Service Object.
-
-## 10. Capacity and scheduling boundary
-
-This V1 gate is not a full optimization scheduler.
-
-Existing capacity/workstation/calendar primitives can contribute to a feasible current schedule. A future generic scheduling/work-allocation resolver may compare multiple pending Service Objects and update their current schedule projections.
-
-Do not duplicate workstation selection, reservation search, candidate ranking, forward/backward planning, or optimization logic inside the route coordinator.
-
-Thus:
-
-```text
-scheduler/work allocation
-  -> current feasible/resolved timing
-  -> route temporal gate
-  -> start when eligible
-```
-
-## 11. Route migration compatibility
-
-Stable route policy is part of the saved in-flight route projection. Publishing changed route policy does not silently rewrite an existing route.
-
-Dynamic schedule recalculation is different: changing a pending step's current planned/eligible time does not by itself require route migration because the pinned route sequence and Process Definitions remain unchanged.
-
-An in-progress route requires explicit governed route migration only when the pinned route itself changes. A completed route remains immutable historical record.
-
-## 12. No architecture expansion
-
-This slice adds:
+This refactor requires:
 
 ```text
 new tables               0
@@ -251,4 +303,4 @@ new reasoning operators  0
 new domain schedulers    0
 ```
 
-It composes the existing route snapshot/runtime and Wave 2 calendar primitives while leaving cross-object scheduling as a generic bounded scheduler/work-allocation responsibility.
+It reuses the current route JSONB projection and existing Process/Macro/Effect architecture while restoring scheduling authority to the governed Planning/Scheduling process.
