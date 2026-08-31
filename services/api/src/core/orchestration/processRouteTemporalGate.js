@@ -93,8 +93,10 @@ export function resolveRouteStepMaturity(snapshot, step, options = {}) {
   if (!schedule) {
     return {
       mature: false,
+      eligible: false,
       scheduled: false,
       evaluated_at: now.toISOString(),
+      eligible_at: null,
       planned_start_at: null,
       planned_finish_at: null,
       schedule_source_code: null,
@@ -116,8 +118,10 @@ export function resolveRouteStepMaturity(snapshot, step, options = {}) {
 
   return {
     mature,
+    eligible: mature,
     scheduled: true,
     evaluated_at: now.toISOString(),
+    eligible_at: plannedStart.toISOString(),
     planned_start_at: plannedStart.toISOString(),
     planned_finish_at: plannedFinish?.toISOString() || null,
     schedule_source_code: schedule.source_code || null,
