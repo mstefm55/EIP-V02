@@ -4,7 +4,7 @@ import {
   coordinateProcessRoute
 } from "./processRouteCoordinator.js";
 import { resolveNextRouteStep } from "./processRoutePlanner.js";
-import { resolveRouteStepTemporalEligibility } from "./processRouteTemporalGate.js";
+import { resolveRouteStepMaturity } from "./processRouteTemporalGate.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -65,21 +65,38 @@ export async function executeRouteStartAction(client, snapshot, action, options 
 export async function runProcessRouteTick(client, snapshot, options = {}) {
   const serviceObjectId = requireText(options.serviceObjectId, "SERVICE_OBJECT_ID_REQUIRED");
   const nextStep = resolveNextRouteStep(snapshot);
-  let temporal = null;
+  let maturity = null;
 
   if (nextStep?.state === "PENDING") {
-    temporal = resolveRouteStepTemporalEligibility(snapshot, nextStep, options);
-    if (!temporal.eligible) {
+    maturity = resolveRouteStepMaturity(snapshot, nextStep, options);
+
+    if (!maturity.scheduled) {
       return {
         snapshot,
-        temporal,
+        maturity,
+        action: {
+          type: "WAIT_SCHEDULE",
+          service_object_id: serviceObjectId,
+          step_code: nextStep.step_code,
+          reason: maturity.reason
+        }
+      };
+    }
+
+    if (!maturity.mature) {
+      return {
+        snapshot,
+        maturity,
         action: {
           type: "WAIT_TIME",
           service_object_id: serviceObjectId,
           step_code: nextStep.step_code,
-          eligible_at: temporal.eligible_at,
-          reason: temporal.reason,
-          calendar_code: temporal.calendar_code
+          eligible_at: maturity.planned_start_at,
+          planned_start_at: maturity.planned_start_at,
+          planned_finish_at: maturity.planned_finish_at,
+          schedule_source_code: maturity.schedule_source_code,
+          schedule_revision: maturity.schedule_revision,
+          reason: maturity.reason
         }
       };
     }
@@ -88,12 +105,12 @@ export async function runProcessRouteTick(client, snapshot, options = {}) {
   const coordination = coordinateProcessRoute(snapshot, { serviceObjectId });
 
   if (coordination.action.type !== "START_PROCESS") {
-    return temporal ? { ...coordination, temporal } : coordination;
+    return maturity ? { ...coordination, maturity } : coordination;
   }
 
   const started = await executeRouteStartAction(client, coordination.snapshot, coordination.action, {
     ...options,
     serviceObjectId
   });
-  return temporal ? { ...started, temporal } : started;
+  return maturity ? { ...started, maturity } : started;
 }
