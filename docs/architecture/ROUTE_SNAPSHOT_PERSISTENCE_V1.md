@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md` and `ORCHESTRATION_V1.md`.
+Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md`, `EXECUTION_AND_ROUTE_CANON.md`, and `ORCHESTRATION_V1.md`.
 
 ## 1. Purpose
 
@@ -26,6 +26,8 @@ A multi-process route belongs to the lifecycle of one Service Object and exists 
 
 Therefore it should not be stored only inside one child Process Instance.
 
+The route is resolved at the governed route-initialization trigger, then the saved version-pinned snapshot becomes the orchestration authority for that Service Object. The orchestrator progresses this saved route; it does not rediscover a new route after every step.
+
 The V1 route snapshot contains only bounded orchestration state and provenance:
 
 ```text
@@ -34,6 +36,7 @@ route source/provenance
 ordered process-definition snapshot
 route-step state
 bound process_instance_id per active/completed step
+bounded temporal/orchestration eligibility metadata where approved
 ```
 
 Business payloads and arbitrary calculation results do not belong inside this runtime route snapshot.
@@ -88,7 +91,11 @@ The intended transaction-level operation is:
 BEGIN
   -> SELECT route projection FROM service_object FOR UPDATE
   -> run lifecycle coordinator
-  -> observe/start/reuse Process Instance as needed
+  -> observe current Process Instance
+  -> if completed, mark saved route step COMPLETED
+  -> determine next route-step temporal/resource eligibility
+  -> start/reuse next Process Instance only when eligible
+  -> otherwise persist a waiting route state
   -> persist resulting route snapshot
 COMMIT
 ```
@@ -98,12 +105,36 @@ The persistence helper assumes the supplied database client participates in the 
 This preserves the boundary:
 
 ```text
-Process Engine       = one Process Instance
-Route Coordinator    = sequencing between Process Instances
-Persistence Adapter  = durable route snapshot
+Process Engine        = one Process Instance
+Route Coordinator     = sequencing between saved route steps
+Temporal resolver     = whether/when the next step may start
+Persistence Adapter   = durable route snapshot
 ```
 
-## 7. No schema expansion
+Completion of one Process Instance is not, by itself, permission to start the next Process Instance immediately.
+
+## 7. Route immutability and migration
+
+Publishing a new route does not rewrite already-pinned Service Object routes.
+
+```text
+new Service Object
+  -> current route resolution
+
+in-progress Service Object
+  -> remains on existing saved route by default
+  -> may move only through explicit governed route migration
+
+completed Service Object
+  -> completed route is immutable historical record
+  -> never migrated
+```
+
+Route migration is a separate governed operation. It must preserve old/new route provenance and completed-step history, and must not silently replace a completed route or erase already-executed work.
+
+The persistence adapter's `replaceExisting` mechanism is a low-level implementation control and must not be treated as authorization for arbitrary business route migration. Higher-level route migration governance must decide whether replacement is allowed and how history/mapping is preserved.
+
+## 8. No schema expansion
 
 This slice adds:
 
