@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { runProcessRouteLifecycleTick } from "./processRouteLifecycleRuntime.js";
+import { normalizeRouteStepSchedule } from "./processRouteTemporalGate.js";
 
 const ROUTE_PATH = Object.freeze(["_eip_runtime", "process_route_v1"]);
 const DEFAULT_MAX_ROUTE_BYTES = 128 * 1024;
@@ -42,6 +43,9 @@ function validateSnapshotShape(snapshot, options = {}) {
     if (!normalizeText(step.step_code)) throw new Error(`ROUTE_SNAPSHOT_STEP_CODE_REQUIRED:${index}`);
     if (!normalizeText(step.process_def_id)) {
       throw new Error(`ROUTE_SNAPSHOT_PROCESS_DEF_REQUIRED:${step.step_code || index}`);
+    }
+    if (step.schedule_v1 !== undefined && step.schedule_v1 !== null) {
+      normalizeRouteStepSchedule(step.schedule_v1, step.step_code || String(index));
     }
   }
 
