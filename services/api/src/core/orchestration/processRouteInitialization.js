@@ -1,10 +1,8 @@
 import { buildProcessRouteSnapshot } from "./processRoutePlanner.js";
 import { resolveProcessRouteApplicability } from "./processRouteApplicability.js";
-import { normalizeRouteTemporalPolicy } from "./processRouteTemporalGate.js";
 import {
   loadProcessRouteSnapshot,
-  persistProcessRouteSnapshot,
-  runPersistedProcessRouteLifecycleTick
+  persistProcessRouteSnapshot
 } from "./processRoutePersistence.js";
 
 const DEFAULT_MAX_CANDIDATES = 64;
@@ -45,21 +43,6 @@ function resolvedApplicability(candidate, options = {}) {
     throw new Error(`ROUTE_APPLICABILITY_INVALID:${candidate.binding_id}`);
   }
   return value;
-}
-
-function resolvedTemporalPolicy(candidate, meta, options = {}) {
-  const map = options.temporalByBindingId;
-  let value;
-  if (map !== undefined) {
-    if (!map || typeof map !== "object" || Array.isArray(map)) {
-      throw new Error("ROUTE_TEMPORAL_MAP_INVALID");
-    }
-    if (Object.prototype.hasOwnProperty.call(map, candidate.binding_id)) {
-      value = map[candidate.binding_id];
-    }
-  }
-  if (value === undefined) value = meta.temporal_v1;
-  return normalizeRouteTemporalPolicy(value, candidate.binding_id);
 }
 
 function normalizeSequence(value, required, bindingId) {
@@ -176,7 +159,6 @@ export function buildProcessRouteFromCandidates(candidates, options = {}) {
     prepared.push({
       candidate,
       meta,
-      temporal: resolvedTemporalPolicy(candidate, meta, options),
       bindingId,
       processDefId,
       processCode,
@@ -200,8 +182,7 @@ export function buildProcessRouteFromCandidates(candidates, options = {}) {
         ? Number(item.candidate.binding_priority)
         : null,
       binding_task_type: normalizeText(item.candidate.binding_task_type) || null,
-      route_metadata_version: 1,
-      ...(item.temporal ? { temporal_v1: item.temporal } : {})
+      route_metadata_version: 1
     }
   }));
 
@@ -287,12 +268,15 @@ export async function resolveAndPersistProcessRoute(client, options = {}) {
   };
 }
 
-export async function initializeAndStartProcessRoute(client, options = {}) {
+export async function initializeProcessRoute(client, options = {}) {
   const initialized = await resolveAndPersistProcessRoute(client, options);
-  const runtime = await runPersistedProcessRouteLifecycleTick(client, options);
 
   return {
-    ...runtime,
+    snapshot: initialized.snapshot,
+    action: {
+      type: "ROUTE_INITIALIZED",
+      service_object_id: requireText(options.serviceObjectId, "SERVICE_OBJECT_ID_REQUIRED")
+    },
     initialization: {
       service_object_type: initialized.service_object_type,
       candidate_count: initialized.candidate_count,
@@ -302,6 +286,13 @@ export async function initializeAndStartProcessRoute(client, options = {}) {
       applicability_audit_digest: initialized.applicability.audit_digest,
       applicability_parent_attr_paths: initialized.applicability.parent_attr_paths,
       applicability_projection_queries: initialized.applicability.projection_queries
-    }
+    },
+    persistence: initialized.persistence
   };
+}
+
+// Transitional compatibility wrapper. Route initialization no longer starts the
+// first Process Instance. Scheduling must first persist the accepted route dates.
+export async function initializeAndStartProcessRoute(client, options = {}) {
+  return initializeProcessRoute(client, options);
 }
