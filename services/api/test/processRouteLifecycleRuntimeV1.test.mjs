@@ -82,7 +82,7 @@ test("active bound Process Instance remains waiting without starting another pro
   assert.equal(client.calls.length, 1);
 });
 
-test("completed bound Process Instance advances and starts the next pinned Process Definition", async () => {
+test("completed bound Process Instance advances route state but next unscheduled process waits for Planning/Scheduling", async () => {
   const snapshot = activeBoundRoute();
   const client = processClient({
     id: "pi-1",
@@ -91,26 +91,26 @@ test("completed bound Process Instance advances and starts the next pinned Proce
     status: "completed",
     ended_at: "2026-08-31T00:30:00.000Z"
   });
-  const starts = [];
+  let starts = 0;
 
   const result = await runProcessRouteLifecycleTick(client, snapshot, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    startProcess: async (_client, input) => {
-      starts.push(input);
-      return { ok: true, item: { id: "pi-2" }, reused: false };
+    now: "2026-08-31T00:30:00.000Z",
+    startProcess: async () => {
+      starts += 1;
+      throw new Error("SHOULD_NOT_START");
     }
   });
 
   assert.equal(result.observation.status, "completed");
   assert.equal(result.snapshot.steps[0].state, "COMPLETED");
-  assert.equal(result.snapshot.steps[1].state, "ACTIVE");
-  assert.equal(result.snapshot.steps[1].process_instance_id, "pi-2");
-  assert.equal(result.action.type, "PROCESS_STARTED");
+  assert.equal(result.snapshot.steps[0].completed_at, "2026-08-31T00:30:00.000Z");
+  assert.equal(result.snapshot.steps[1].state, "PENDING");
+  assert.equal(result.action.type, "WAIT_SCHEDULE");
   assert.equal(result.action.step_code, "PLAN");
-  assert.equal(starts.length, 1);
-  assert.equal(starts[0].processDefId, "pd-plan");
+  assert.equal(starts, 0);
 });
 
 test("completed final Process Instance emits route completion and does not start another process", async () => {
