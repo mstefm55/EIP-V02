@@ -35,6 +35,13 @@ function findStepByInstance(snapshot, processInstanceId) {
   ) || null;
 }
 
+function normalizeOptionalInstant(value, code) {
+  if (value === null || value === undefined || value === "") return null;
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(code);
+  return date.toISOString();
+}
+
 export function buildRouteStepIdempotencyKey(snapshot, options = {}) {
   const serviceObjectId = normalizeText(options.serviceObjectId);
   const step = options.step;
@@ -163,7 +170,22 @@ export function applyProcessInstanceOutcome(snapshot, input = {}) {
     if (step.state !== "ACTIVE") {
       throw new Error(`ROUTE_PROCESS_OUTCOME_STATE_INVALID:${step.step_code}:${step.state}:completed`);
     }
-    return transitionRouteStep(nextSnapshot, step.step_code, "COMPLETED");
+    const completedAt = normalizeOptionalInstant(
+      input.completedAt,
+      `ROUTE_PROCESS_COMPLETION_TIME_INVALID:${step.step_code}`
+    );
+    nextSnapshot = transitionRouteStep(nextSnapshot, step.step_code, "COMPLETED");
+    if (completedAt) {
+      nextSnapshot = {
+        ...nextSnapshot,
+        steps: nextSnapshot.steps.map((candidate) =>
+          candidate.step_code === step.step_code
+            ? { ...candidate, completed_at: completedAt }
+            : { ...candidate }
+        )
+      };
+    }
+    return nextSnapshot;
   }
 
   if (status === "blocked") {
