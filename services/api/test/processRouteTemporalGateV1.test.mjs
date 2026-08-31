@@ -9,22 +9,12 @@ import {
 import { runProcessRouteTick } from "../src/core/orchestration/processRouteRuntime.js";
 import { runProcessRouteLifecycleTick } from "../src/core/orchestration/processRouteLifecycleRuntime.js";
 import { buildProcessRouteFromCandidates } from "../src/core/orchestration/processRouteInitialization.js";
-import { resolveRouteStepTemporalEligibility } from "../src/core/orchestration/processRouteTemporalGate.js";
+import {
+  normalizeRouteStepSchedule,
+  resolveRouteStepMaturity
+} from "../src/core/orchestration/processRouteTemporalGate.js";
 
-const WEEKDAY_CALENDAR = [
-  {
-    timezone: "UTC",
-    weekly: {
-      MONDAY: [{ start: "08:00", end: "17:00" }],
-      TUESDAY: [{ start: "08:00", end: "17:00" }],
-      WEDNESDAY: [{ start: "08:00", end: "17:00" }],
-      THURSDAY: [{ start: "08:00", end: "17:00" }],
-      FRIDAY: [{ start: "08:00", end: "17:00" }]
-    }
-  }
-];
-
-function route(secondTemporal = null) {
+function route() {
   return buildProcessRouteSnapshot(
     [
       {
@@ -39,8 +29,7 @@ function route(secondTemporal = null) {
         sequence: 200,
         process_def_id: "pd-second",
         process_code: "SECOND_PROCESS",
-        process_version: 1,
-        attrs: secondTemporal ? { temporal_v1: secondTemporal } : {}
+        process_version: 1
       }
     ],
     {
@@ -51,15 +40,49 @@ function route(secondTemporal = null) {
   );
 }
 
-function pendingSecond(secondTemporal) {
-  const snapshot = route(secondTemporal);
-  snapshot.steps[0].state = "COMPLETED";
-  snapshot.steps[0].completed_at = "2026-08-31T16:30:00.000Z";
+function setSchedule(snapshot, stepCode, schedule) {
+  const step = snapshot.steps.find((candidate) => candidate.step_code === stepCode);
+  if (!step) throw new Error(`TEST_STEP_NOT_FOUND:${stepCode}`);
+  step.schedule_v1 = normalizeRouteStepSchedule(schedule, stepCode);
   return snapshot;
 }
 
-test("future not-before keeps route step PENDING and does not start Process Instance", async () => {
-  const snapshot = pendingSecond({ not_before_at: "2026-08-31T12:00:00.000Z" });
+function pendingSecond() {
+  const snapshot = route();
+  snapshot.steps[0].state = "COMPLETED";
+  snapshot.steps[0].completed_at = "2026-08-31T10:00:00.000Z";
+  return snapshot;
+}
+
+test("unscheduled pending route step fails closed with WAIT_SCHEDULE", async () => {
+  const snapshot = pendingSecond();
+  let starts = 0;
+
+  const result = await runProcessRouteTick({}, snapshot, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    now: "2026-08-31T10:00:00.000Z",
+    startProcess: async () => {
+      starts += 1;
+      throw new Error("SHOULD_NOT_START");
+    }
+  });
+
+  assert.equal(result.action.type, "WAIT_SCHEDULE");
+  assert.equal(result.action.step_code, "SECOND");
+  assert.equal(result.maturity.scheduled, false);
+  assert.equal(result.snapshot.steps[1].state, "PENDING");
+  assert.equal(starts, 0);
+});
+
+test("persisted future planned start keeps route step PENDING", async () => {
+  const snapshot = setSchedule(pendingSecond(), "SECOND", {
+    planned_start_at: "2026-08-31T12:00:00.000Z",
+    planned_finish_at: "2026-08-31T14:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "41"
+  });
   let starts = 0;
 
   const result = await runProcessRouteTick({}, snapshot, {
@@ -75,12 +98,18 @@ test("future not-before keeps route step PENDING and does not start Process Inst
 
   assert.equal(result.action.type, "WAIT_TIME");
   assert.equal(result.action.eligible_at, "2026-08-31T12:00:00.000Z");
+  assert.equal(result.action.schedule_revision, "41");
   assert.equal(result.snapshot.steps[1].state, "PENDING");
   assert.equal(starts, 0);
 });
 
-test("route step starts once not-before instant is reached", async () => {
-  const snapshot = pendingSecond({ not_before_at: "2026-08-31T12:00:00.000Z" });
+test("route step starts once persisted planned start is reached", async () => {
+  const snapshot = setSchedule(pendingSecond(), "SECOND", {
+    planned_start_at: "2026-08-31T12:00:00.000Z",
+    planned_finish_at: "2026-08-31T14:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "42"
+  });
 
   const result = await runProcessRouteTick({}, snapshot, {
     tenantId: "tenant-1",
@@ -93,44 +122,47 @@ test("route step starts once not-before instant is reached", async () => {
   assert.equal(result.action.type, "PROCESS_STARTED");
   assert.equal(result.snapshot.steps[1].state, "ACTIVE");
   assert.equal(result.snapshot.steps[1].process_instance_id, "pi-second");
+  assert.equal(result.maturity.reason, "MATURE");
 });
 
-test("calendar code delays a start until the next working instant", async () => {
-  const snapshot = pendingSecond({ calendar_code: "SITE_DEFAULT" });
-
-  const result = await runProcessRouteTick({}, snapshot, {
-    tenantId: "tenant-1",
-    identityId: "identity-1",
-    serviceObjectId: "so-1",
-    now: "2026-08-31T18:00:00.000Z",
-    calendarLayersByCode: { SITE_DEFAULT: WEEKDAY_CALENDAR }
-  });
-
-  assert.equal(result.action.type, "WAIT_TIME");
-  assert.equal(result.action.reason, "CALENDAR_CLOSED");
-  assert.equal(result.action.eligible_at, "2026-09-01T08:00:00.000Z");
-  assert.equal(result.snapshot.steps[1].state, "PENDING");
+test("route maturity gate rejects an invalid persisted schedule range", () => {
+  assert.throws(
+    () => normalizeRouteStepSchedule({
+      planned_start_at: "2026-08-31T12:00:00.000Z",
+      planned_finish_at: "2026-08-31T11:00:00.000Z"
+    }, "SECOND"),
+    /ROUTE_SCHEDULE_RANGE_INVALID:SECOND/
+  );
 });
 
-test("working delay after previous completion composes existing calendar arithmetic", () => {
-  const snapshot = pendingSecond({
-    working_delay_after_previous_minutes: 120,
-    calendar_code: "SITE_DEFAULT"
+test("route maturity gate does not calculate calendars, delays or capacity", () => {
+  const snapshot = setSchedule(pendingSecond(), "SECOND", {
+    planned_start_at: "2026-09-01T09:30:00.000Z",
+    planned_finish_at: "2026-09-01T11:30:00.000Z",
+    source_code: "PLANNING_PROCESS",
+    revision: "9"
   });
-  const step = snapshot.steps[1];
 
-  const decision = resolveRouteStepTemporalEligibility(snapshot, step, {
+  const decision = resolveRouteStepMaturity(snapshot, snapshot.steps[1], {
     now: "2026-08-31T17:00:00.000Z",
-    calendarLayersByCode: { SITE_DEFAULT: WEEKDAY_CALENDAR }
+    calendarLayersByCode: { SHOULD_BE_IGNORED: [{ invalid: true }] },
+    scheduleByStepCode: { SHOULD_BE_IGNORED: { planned_start_at: "2026-08-31T17:00:00.000Z" } }
   });
 
-  assert.equal(decision.eligible, false);
-  assert.equal(decision.reason, "PREVIOUS_WORKING_DELAY");
-  assert.equal(decision.eligible_at, "2026-09-01T09:30:00.000Z");
+  assert.equal(decision.mature, false);
+  assert.equal(decision.planned_start_at, "2026-09-01T09:30:00.000Z");
+  assert.equal(decision.schedule_source_code, "PLANNING_PROCESS");
+  assert.equal(decision.schedule_revision, "9");
 });
 
-test("completed Process Instance is timestamped and next timed step waits instead of starting immediately", async () => {
-  const snapshot = route({ not_before_at: "2026-08-31T12:00:00.000Z" });
+test("completed Process Instance records actual completion then next unscheduled step waits for Planning/Scheduling", async () => {
+  const snapshot = route();
+  setSchedule(snapshot, "FIRST", {
+    planned_start_at: "2026-08-31T08:00:00.000Z",
+    planned_finish_at: "2026-08-31T10:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "1"
+  });
   const coordinated = coordinateProcessRoute(snapshot, { serviceObjectId: "so-1" });
   const active = bindRouteStepInstance(coordinated.snapshot, "FIRST", "pi-first");
   let starts = 0;
@@ -163,36 +195,11 @@ test("completed Process Instance is timestamped and next timed step waits instea
   assert.equal(result.snapshot.steps[0].state, "COMPLETED");
   assert.equal(result.snapshot.steps[0].completed_at, "2026-08-31T10:00:00.000Z");
   assert.equal(result.snapshot.steps[1].state, "PENDING");
-  assert.equal(result.action.type, "WAIT_TIME");
+  assert.equal(result.action.type, "WAIT_SCHEDULE");
   assert.equal(starts, 0);
 });
 
-test("referenced calendar must be resolved and fails closed when missing", () => {
-  const snapshot = pendingSecond({ calendar_code: "SITE_DEFAULT" });
-  assert.throws(
-    () => resolveRouteStepTemporalEligibility(snapshot, snapshot.steps[1], {
-      now: "2026-08-31T10:00:00.000Z"
-    }),
-    /ROUTE_CALENDAR_NOT_RESOLVED:SITE_DEFAULT/
-  );
-});
-
-test("elapsed and working previous-step delay modes cannot conflict", () => {
-  const snapshot = pendingSecond({
-    delay_after_previous_minutes: 30,
-    working_delay_after_previous_minutes: 30,
-    calendar_code: "SITE_DEFAULT"
-  });
-  assert.throws(
-    () => resolveRouteStepTemporalEligibility(snapshot, snapshot.steps[1], {
-      now: "2026-08-31T10:00:00.000Z",
-      calendarLayersByCode: { SITE_DEFAULT: WEEKDAY_CALENDAR }
-    }),
-    /ROUTE_PREVIOUS_DELAY_MODE_CONFLICT/
-  );
-});
-
-test("route initialization snapshots governed temporal metadata without business-specific runtime code", () => {
+test("route initialization no longer snapshots scheduling policy into the pinned route", () => {
   const candidates = [
     {
       binding_id: "binding-1",
@@ -219,97 +226,80 @@ test("route initialization snapshots governed temporal metadata without business
     createdAt: "2026-08-31T00:00:00.000Z"
   });
 
-  assert.deepEqual(snapshot.steps[0].attrs.temporal_v1, {
-    calendar_code: "SITE_DEFAULT",
-    delay_after_previous_minutes: 45
-  });
+  assert.equal(snapshot.steps[0].attrs.temporal_v1, undefined);
+  assert.equal(snapshot.steps[0].schedule_v1, undefined);
 });
 
-test("pending step schedule can move earlier without route migration", async () => {
-  const snapshot = pendingSecond(null);
-  let starts = 0;
+test("pending schedule can move earlier through persisted route patch without route migration", async () => {
+  const snapshot = setSchedule(pendingSecond(), "SECOND", {
+    planned_start_at: "2026-08-31T14:00:00.000Z",
+    planned_finish_at: "2026-08-31T16:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "41"
+  });
 
   const laterPlan = await runProcessRouteTick({}, snapshot, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    now: "2026-08-31T10:00:00.000Z",
-    scheduleByStepCode: {
-      SECOND: {
-        planned_start_at: "2026-08-31T14:00:00.000Z",
-        source_code: "CURRENT_SCHEDULE",
-        revision: "41"
-      }
-    },
-    startProcess: async () => {
-      starts += 1;
-      throw new Error("SHOULD_NOT_START");
-    }
+    now: "2026-08-31T10:00:00.000Z"
   });
-
   assert.equal(laterPlan.action.type, "WAIT_TIME");
   assert.equal(laterPlan.action.eligible_at, "2026-08-31T14:00:00.000Z");
-  assert.equal(laterPlan.snapshot.steps[1].state, "PENDING");
+
+  setSchedule(snapshot, "SECOND", {
+    planned_start_at: "2026-08-31T11:00:00.000Z",
+    planned_finish_at: "2026-08-31T13:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "42"
+  });
 
   const earlierPlan = await runProcessRouteTick({}, snapshot, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
     now: "2026-08-31T11:00:00.000Z",
-    scheduleByStepCode: {
-      SECOND: {
-        planned_start_at: "2026-08-31T11:00:00.000Z",
-        source_code: "CURRENT_SCHEDULE",
-        revision: "42"
-      }
-    },
-    startProcess: async () => {
-      starts += 1;
-      return { ok: true, item: { id: "pi-second" }, reused: false };
-    }
+    startProcess: async () => ({ ok: true, item: { id: "pi-second" }, reused: false })
   });
 
   assert.equal(earlierPlan.action.type, "PROCESS_STARTED");
-  assert.equal(earlierPlan.snapshot.steps[1].state, "ACTIVE");
-  assert.equal(earlierPlan.temporal.schedule_revision, "42");
-  assert.equal(starts, 1);
+  assert.equal(earlierPlan.maturity.schedule_revision, "42");
+  assert.equal(earlierPlan.snapshot.steps[1].process_instance_id, "pi-second");
 });
 
-test("pending step schedule can move later while route remains unchanged", async () => {
-  const snapshot = pendingSecond(null);
+test("pending schedule can move later through persisted route patch without route migration", async () => {
+  const snapshot = setSchedule(pendingSecond(), "SECOND", {
+    planned_start_at: "2026-08-31T11:00:00.000Z",
+    planned_finish_at: "2026-08-31T13:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "7"
+  });
 
   const firstDecision = await runProcessRouteTick({}, snapshot, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    now: "2026-08-31T10:00:00.000Z",
-    scheduleByStepCode: {
-      SECOND: {
-        eligible_at: "2026-08-31T11:00:00.000Z",
-        source_code: "CURRENT_SCHEDULE",
-        revision: "7"
-      }
-    }
+    now: "2026-08-31T10:00:00.000Z"
+  });
+
+  setSchedule(snapshot, "SECOND", {
+    planned_start_at: "2026-08-31T15:00:00.000Z",
+    planned_finish_at: "2026-08-31T17:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: "8"
   });
 
   const delayedDecision = await runProcessRouteTick({}, snapshot, {
     tenantId: "tenant-1",
     identityId: "identity-1",
     serviceObjectId: "so-1",
-    now: "2026-08-31T10:30:00.000Z",
-    scheduleByStepCode: {
-      SECOND: {
-        eligible_at: "2026-08-31T15:00:00.000Z",
-        source_code: "CURRENT_SCHEDULE",
-        revision: "8"
-      }
-    }
+    now: "2026-08-31T10:30:00.000Z"
   });
 
   assert.equal(firstDecision.action.type, "WAIT_TIME");
   assert.equal(firstDecision.action.eligible_at, "2026-08-31T11:00:00.000Z");
   assert.equal(delayedDecision.action.type, "WAIT_TIME");
   assert.equal(delayedDecision.action.eligible_at, "2026-08-31T15:00:00.000Z");
+  assert.equal(delayedDecision.maturity.schedule_revision, "8");
   assert.equal(delayedDecision.snapshot.steps[1].state, "PENDING");
-  assert.equal(delayedDecision.temporal.schedule_revision, "8");
 });
