@@ -46,6 +46,25 @@ function resolvedApplicability(candidate, options = {}) {
   return value;
 }
 
+function resolvedTemporalPolicy(candidate, meta, options = {}) {
+  const map = options.temporalByBindingId;
+  let value;
+  if (map !== undefined) {
+    if (!map || typeof map !== "object" || Array.isArray(map)) {
+      throw new Error("ROUTE_TEMPORAL_MAP_INVALID");
+    }
+    if (Object.prototype.hasOwnProperty.call(map, candidate.binding_id)) {
+      value = map[candidate.binding_id];
+    }
+  }
+  if (value === undefined) value = meta.temporal_v1;
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`ROUTE_TEMPORAL_POLICY_INVALID:${candidate.binding_id}`);
+  }
+  return { ...value };
+}
+
 function normalizeSequence(value, required, bindingId) {
   if (value === undefined || value === null || value === "") {
     if (required) throw new Error(`ROUTE_SEQUENCE_REQUIRED:${bindingId}`);
@@ -160,6 +179,7 @@ export function buildProcessRouteFromCandidates(candidates, options = {}) {
     prepared.push({
       candidate,
       meta,
+      temporal: resolvedTemporalPolicy(candidate, meta, options),
       bindingId,
       processDefId,
       processCode,
@@ -183,7 +203,8 @@ export function buildProcessRouteFromCandidates(candidates, options = {}) {
         ? Number(item.candidate.binding_priority)
         : null,
       binding_task_type: normalizeText(item.candidate.binding_task_type) || null,
-      route_metadata_version: 1
+      route_metadata_version: 1,
+      ...(item.temporal ? { temporal_v1: item.temporal } : {})
     }
   }));
 
