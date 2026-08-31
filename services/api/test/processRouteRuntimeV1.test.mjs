@@ -8,33 +8,21 @@ import {
 } from "../src/core/orchestration/processRouteRuntime.js";
 
 function route() {
-  return buildProcessRouteSnapshot(
+  const snapshot = buildProcessRouteSnapshot(
     [
       {
         step_code: "VALIDATE",
         sequence: 100,
         process_def_id: "pd-validate",
         process_code: "VALIDATE_ORDER",
-        process_version: 2,
-        schedule_v1: {
-          planned_start_at: "2026-08-31T08:00:00.000Z",
-          planned_finish_at: "2026-08-31T09:00:00.000Z",
-          source_code: "TEST_SCHEDULE",
-          revision: "1"
-        }
+        process_version: 2
       },
       {
         step_code: "PLAN",
         sequence: 200,
         process_def_id: "pd-plan",
         process_code: "PLAN_WORK",
-        process_version: 7,
-        schedule_v1: {
-          planned_start_at: "2026-08-31T10:00:00.000Z",
-          planned_finish_at: "2026-08-31T11:00:00.000Z",
-          source_code: "TEST_SCHEDULE",
-          revision: "1"
-        }
+        process_version: 7
       }
     ],
     {
@@ -43,6 +31,21 @@ function route() {
       sourceVersion: 3
     }
   );
+
+  // Simulate the accepted Planning/Scheduling result already patched into the saved route.
+  snapshot.steps[0].schedule_v1 = {
+    planned_start_at: "2026-08-31T08:00:00.000Z",
+    planned_finish_at: "2026-08-31T09:00:00.000Z",
+    source_code: "TEST_SCHEDULE",
+    revision: "1"
+  };
+  snapshot.steps[1].schedule_v1 = {
+    planned_start_at: "2026-08-31T10:00:00.000Z",
+    planned_finish_at: "2026-08-31T11:00:00.000Z",
+    source_code: "TEST_SCHEDULE",
+    revision: "1"
+  };
+  return snapshot;
 }
 
 test("route runtime starts the pinned Process Definition once its persisted schedule is mature", async () => {
