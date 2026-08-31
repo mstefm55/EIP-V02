@@ -28,20 +28,47 @@ function parseNonNegativeMinutes(value, code) {
   return minutes;
 }
 
-function routeTemporalPolicy(step) {
-  const attrs = step?.attrs;
-  if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return null;
-  if (attrs.temporal_v1 === undefined || attrs.temporal_v1 === null) return null;
-  const policy = attrs.temporal_v1;
-  if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
-    throw new Error(`ROUTE_TEMPORAL_POLICY_INVALID:${step?.step_code || "<unknown>"}`);
+export function normalizeRouteTemporalPolicy(value, contextCode = "<unknown>") {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`ROUTE_TEMPORAL_POLICY_INVALID:${contextCode}`);
   }
-  for (const key of Object.keys(policy)) {
+  for (const key of Object.keys(value)) {
     if (!ALLOWED_POLICY_KEYS.has(key)) {
       throw new Error(`ROUTE_TEMPORAL_POLICY_FIELD_UNSUPPORTED:${key}`);
     }
   }
-  return policy;
+
+  const notBefore = parseInstant(value.not_before_at, "ROUTE_NOT_BEFORE_INVALID");
+  const elapsedDelay = parseNonNegativeMinutes(
+    value.delay_after_previous_minutes,
+    "ROUTE_PREVIOUS_DELAY_INVALID"
+  );
+  const workingDelay = parseNonNegativeMinutes(
+    value.working_delay_after_previous_minutes,
+    "ROUTE_PREVIOUS_WORKING_DELAY_INVALID"
+  );
+  if (elapsedDelay !== null && workingDelay !== null) {
+    throw new Error("ROUTE_PREVIOUS_DELAY_MODE_CONFLICT");
+  }
+
+  const calendarCode = normalizeText(value.calendar_code) || null;
+  if (workingDelay !== null && !calendarCode) {
+    throw new Error("ROUTE_WORKING_DELAY_CALENDAR_REQUIRED");
+  }
+
+  return {
+    ...(notBefore ? { not_before_at: notBefore.toISOString() } : {}),
+    ...(elapsedDelay !== null ? { delay_after_previous_minutes: elapsedDelay } : {}),
+    ...(workingDelay !== null ? { working_delay_after_previous_minutes: workingDelay } : {}),
+    ...(calendarCode ? { calendar_code: calendarCode } : {})
+  };
+}
+
+function routeTemporalPolicy(step) {
+  const attrs = step?.attrs;
+  if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return null;
+  return normalizeRouteTemporalPolicy(attrs.temporal_v1, step?.step_code || "<unknown>");
 }
 
 function resolveCalendarLayers(policy, options = {}) {
@@ -106,14 +133,8 @@ export function resolveRouteStepTemporalEligibility(snapshot, step, options = {}
     policy.working_delay_after_previous_minutes,
     "ROUTE_PREVIOUS_WORKING_DELAY_INVALID"
   );
-  if (elapsedDelay !== null && workingDelay !== null) {
-    throw new Error("ROUTE_PREVIOUS_DELAY_MODE_CONFLICT");
-  }
 
   const { calendarCode, layers } = resolveCalendarLayers(policy, options);
-  if (workingDelay !== null && !calendarCode) {
-    throw new Error("ROUTE_WORKING_DELAY_CALENDAR_REQUIRED");
-  }
 
   let constraint = null;
   constraint = laterConstraint(constraint, notBefore, "NOT_BEFORE");
