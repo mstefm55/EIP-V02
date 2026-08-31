@@ -53,6 +53,9 @@ export async function readProcessInstanceOutcome(client, action, options = {}) {
   if (row.ended_at && status === "active") {
     throw new Error("PROCESS_INSTANCE_STATE_INCONSISTENT");
   }
+  if (status === "completed" && !row.ended_at) {
+    throw new Error("PROCESS_INSTANCE_STATE_INCONSISTENT");
+  }
 
   if (!["active", "blocked", "completed"].includes(status)) {
     throw new Error(`PROCESS_INSTANCE_STATUS_UNSUPPORTED:${status}`);
@@ -92,7 +95,8 @@ export async function runProcessRouteLifecycleTick(client, snapshot, options = {
 
   const observedSnapshot = applyProcessInstanceOutcome(first.snapshot, {
     processInstanceId: observation.process_instance_id,
-    status: observation.status
+    status: observation.status,
+    completedAt: observation.status === "completed" ? observation.ended_at : null
   });
 
   const next = await runProcessRouteTick(client, observedSnapshot, {
