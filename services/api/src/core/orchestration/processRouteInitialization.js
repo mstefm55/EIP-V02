@@ -1,5 +1,6 @@
 import { buildProcessRouteSnapshot } from "./processRoutePlanner.js";
 import { resolveProcessRouteApplicability } from "./processRouteApplicability.js";
+import { normalizeRouteTemporalPolicy } from "./processRouteTemporalGate.js";
 import {
   loadProcessRouteSnapshot,
   persistProcessRouteSnapshot,
@@ -58,11 +59,7 @@ function resolvedTemporalPolicy(candidate, meta, options = {}) {
     }
   }
   if (value === undefined) value = meta.temporal_v1;
-  if (value === undefined || value === null) return null;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`ROUTE_TEMPORAL_POLICY_INVALID:${candidate.binding_id}`);
-  }
-  return { ...value };
+  return normalizeRouteTemporalPolicy(value, candidate.binding_id);
 }
 
 function normalizeSequence(value, required, bindingId) {
