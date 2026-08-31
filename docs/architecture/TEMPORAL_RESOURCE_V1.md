@@ -1,6 +1,6 @@
 # EIP Temporal and Resource Foundation V1
 
-Date: 2026-08-30
+Date: 2026-09-01
 
 Status: Wave 2 implementation contract under `OPERATING_MODEL_CANON.md`.
 
@@ -11,10 +11,10 @@ Wave 2 adds a small generic temporal/resource foundation without creating a sche
 The Process Engine remains unchanged conceptually:
 
 ```text
-PROCESS -> TASK LABEL -> MACRO -> governed reasoning/resolution -> OBJECT_EFFECT -> OBJECT
+PROCESS -> TASK LABEL / STEP -> MACRO -> governed reasoning/resolution -> OBJECT_EFFECT -> OBJECT
 ```
 
-This wave provides pure/bounded resolvers that can later be invoked from Macro reasoning context.
+This wave provides pure/bounded calculation functions that are invoked from Macro reasoning context. They are tools used by governed Processes such as Planning/Scheduling; they are not peer workflow engines and they do not belong inside route orchestration.
 
 ## 2. No schema expansion in V1
 
@@ -68,7 +68,7 @@ SUBTRACT_WORKING_TIME
 WORKING_TIME_BETWEEN
 ```
 
-The code exposes these through JavaScript functions rather than expanding the generic arithmetic operator catalog. This deliberately avoids capability explosion. They are temporal-resolver capabilities with calendar context, not scalar Math operators.
+The code exposes these through JavaScript functions rather than expanding the generic arithmetic operator catalog. This deliberately avoids capability explosion. They are temporal calculation capabilities with calendar context, not scalar Math operators and not independent workflow engines.
 
 DST spring transitions are calculated using actual UTC elapsed time across local calendar intervals. Ambiguous repeated local times during a fall-back transition require an explicit disambiguation policy before full production scheduling certification.
 
@@ -90,7 +90,9 @@ bounded search limits
 
 It can return a contiguous slot or a set of chronological segments when splitting is explicitly allowed.
 
-This is a generic capacity primitive. It does not know about production lines, operating theatres, vehicles, stores or warehouses.
+This is a generic calculation primitive. It does not know about production lines, operating theatres, vehicles, stores or warehouses.
+
+Its normal architectural consumer is governed Process/Macro reasoning, including Planning/Scheduling logic. Route orchestration must not call it to invent or recalculate a route schedule.
 
 ## 6. Workstation projection V1
 
@@ -122,9 +124,9 @@ Persistence-side candidate queries must prefilter/index candidate sets before th
 
 ## 7. Macro calculation bridge contract
 
-`macroReasoning.js` provides the Wave 1-to-Wave 2 bridge contract without yet patching the Process Engine.
+The Process Engine bridge exposes governed Macro reasoning results to Effects through `$calc.*`.
 
-A Macro may eventually contain:
+A Macro may contain:
 
 ```json
 {
@@ -141,13 +143,22 @@ A Macro may eventually contain:
 }
 ```
 
-Reasoning blocks execute sequentially and later blocks can consume earlier results through `$context.calc.*` inside the reasoning runtime.
+Reasoning blocks execute sequentially and later blocks can consume earlier results through governed calculation context.
 
-The planned Process Engine bridge will expose results to Effects as `$calc.*` without replacing existing Effect handlers.
+The canonical execution order is:
+
+```text
+Process step / transition
+  -> Macro
+      -> reasoning / calculation / decision resolution
+      -> $calc
+      -> ordered Effects using resolved values
+  -> resulting output/state
+```
 
 ## 8. JSONB query guardrail for Macro reasoning
 
-The Process Engine must not begin fetching the entire `service_object.attrs` payload merely because reasoning can reference `$parent.attrs.*`.
+The Process Engine must not fetch the entire `service_object.attrs` payload merely because reasoning can reference `$parent.attrs.*`.
 
 `collectMacroParentAttrPaths(macro)` statically identifies referenced paths. Integration should use those paths to build a bounded JSONB projection query so only required values are loaded.
 
@@ -175,19 +186,23 @@ Not included yet:
 - workstation persistence schema;
 - automatic profile installation;
 - DST fall-back repeated-local-time disambiguation policy;
-- inter-process routing/scheduler (Wave 3).
+- full Planning/Scheduling process model and accepted-schedule Effect integration;
+- IBP/S&OP process layering;
+- advanced freeze/unfreeze, planning-horizon and emergency-rescheduling policies.
 
 These omissions are deliberate boundaries, not missing domain engines.
 
-## 10. Quality gates before Process Engine integration
+The route runtime is specifically **not** the missing scheduler. Scheduling remains a governed subprocess of Planning that composes these generic temporal/resource functions and persists its accepted output to the Service Object route.
 
-Before `$calc` is wired into `core_process_engine.js`:
+## 10. Quality gates before broader Planning/Scheduling integration
 
 1. all existing `governedReasoningV1` tests pass;
 2. all temporal/resource tests pass;
 3. all existing API tests pass;
-4. no new tables/migrations are added;
-5. no existing Effect handler is replaced;
+4. no new tables/migrations are added without schema justification/owner approval;
+5. no existing Effect handler is replaced merely to introduce scheduling semantics;
 6. no whole-document JSONB fetch is introduced for reasoning;
 7. candidate/resource resolution stays bounded;
-8. reasoning audit is bounded and digest-based.
+8. reasoning audit is bounded and digest-based;
+9. route orchestration consumes persisted schedule rather than recalculating it;
+10. normal Planning-cycle scheduling and emergency rescheduling converge on the same governed Scheduling process.
