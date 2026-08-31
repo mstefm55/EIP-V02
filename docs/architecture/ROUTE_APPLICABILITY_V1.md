@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md`, `ORCHESTRATION_V1.md`, `ROUTE_INITIALIZATION_V1.md`, and the existing governed reasoning runtime.
+Status: Wave 3 implementation contract under `OPERATING_MODEL_CANON.md`, `EXECUTION_AND_ROUTE_CANON.md`, `ORCHESTRATION_V1.md`, `ROUTE_INITIALIZATION_V1.md`, and the existing governed reasoning runtime.
 
 ## 1. Purpose
 
@@ -17,7 +17,7 @@ business object
   -> remove candidates whose result is false
   -> order the remaining candidates
   -> save the route
-  -> start the first process
+  -> hand the saved route to orchestration
 ```
 
 No new condition language or business-specific operator is introduced.
@@ -146,15 +146,40 @@ ROUTE PLANNER
   -> ordering/version-pinned snapshot
 
 ROUTE COORDINATOR/RUNTIME
-  -> sequential process execution
+  -> progress through the saved route subject to temporal/resource eligibility
 
 PROCESS ENGINE
-  -> executes each Process Instance
+  -> executes each Process Instance through Macro + governed Effects
 ```
 
 The route planner itself does not evaluate business conditions.
 
-## 8. Audit/provenance
+## 8. Resolution timing and migration boundary
+
+Applicability is resolved when a Service Object is first assigned its governed route, normally at creation or another explicit route-initialization trigger.
+
+The resulting applicable, ordered and version-pinned route is persisted on the Service Object and becomes the orchestration authority for that object.
+
+The route is not re-resolved after every Process Instance completion.
+
+If route definitions or applicability policy later change:
+
+```text
+new Service Objects
+  -> resolve against the current published route/policy
+
+in-progress Service Objects
+  -> remain pinned to their existing saved route by default
+  -> may move only through explicit governed route migration
+
+completed Service Objects
+  -> retain their completed saved route unchanged
+  -> are not route-migration candidates
+```
+
+This preserves historical truth and prevents silent mid-lifecycle rule changes.
+
+## 9. Audit/provenance
 
 Applicability resolution returns bounded audit metadata containing:
 
@@ -169,7 +194,9 @@ Applicability resolution returns bounded audit metadata containing:
 
 The raw Service Object values used by the rule are not copied into route audit merely for convenience.
 
-## 9. No architecture expansion
+Route migration, when later implemented, must preserve previous/new route provenance and must not rewrite completed route history.
+
+## 10. No architecture expansion
 
 This slice adds:
 
@@ -184,7 +211,7 @@ Process Engine changes   0
 
 It composes the existing Process Binding, governed reasoning runtime, route planner, route persistence, and route lifecycle runtime.
 
-## 10. Examples
+## 11. Examples
 
 A high-value review step can be expressed generically as:
 
