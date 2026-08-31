@@ -9,6 +9,12 @@ const ALLOWED_POLICY_KEYS = new Set([
   "working_delay_after_previous_minutes",
   "calendar_code"
 ]);
+const ALLOWED_SCHEDULE_KEYS = new Set([
+  "eligible_at",
+  "planned_start_at",
+  "source_code",
+  "revision"
+]);
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -71,6 +77,42 @@ function routeTemporalPolicy(step) {
   return normalizeRouteTemporalPolicy(attrs.temporal_v1, step?.step_code || "<unknown>");
 }
 
+function normalizeDynamicSchedule(step, options = {}) {
+  const map = options.scheduleByStepCode;
+  if (map === undefined || map === null) return null;
+  if (typeof map !== "object" || Array.isArray(map)) {
+    throw new Error("ROUTE_SCHEDULE_MAP_INVALID");
+  }
+
+  const raw = map[step.step_code];
+  if (raw === undefined || raw === null) return null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`ROUTE_SCHEDULE_INVALID:${step.step_code}`);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!ALLOWED_SCHEDULE_KEYS.has(key)) {
+      throw new Error(`ROUTE_SCHEDULE_FIELD_UNSUPPORTED:${key}`);
+    }
+  }
+
+  const eligibleAt = parseInstant(raw.eligible_at, `ROUTE_DYNAMIC_ELIGIBLE_AT_INVALID:${step.step_code}`);
+  const plannedStartAt = parseInstant(
+    raw.planned_start_at,
+    `ROUTE_PLANNED_START_AT_INVALID:${step.step_code}`
+  );
+  const sourceCode = normalizeText(raw.source_code) || null;
+  const revision = raw.revision === undefined || raw.revision === null
+    ? null
+    : normalizeText(raw.revision);
+
+  return {
+    eligibleAt,
+    plannedStartAt,
+    sourceCode,
+    revision: revision || null
+  };
+}
+
 function resolveCalendarLayers(policy, options = {}) {
   const calendarCode = normalizeText(policy?.calendar_code);
   if (!calendarCode) return { calendarCode: null, layers: null };
@@ -114,23 +156,15 @@ export function resolveRouteStepTemporalEligibility(snapshot, step, options = {}
 
   const now = parseInstant(options.now ?? new Date(), "ROUTE_TEMPORAL_NOW_INVALID");
   const policy = routeTemporalPolicy(step);
-  if (!policy) {
-    return {
-      eligible: true,
-      evaluated_at: now.toISOString(),
-      eligible_at: now.toISOString(),
-      reason: "NO_TEMPORAL_POLICY",
-      calendar_code: null
-    };
-  }
+  const dynamicSchedule = normalizeDynamicSchedule(step, options);
 
-  const notBefore = parseInstant(policy.not_before_at, "ROUTE_NOT_BEFORE_INVALID");
+  const notBefore = parseInstant(policy?.not_before_at, "ROUTE_NOT_BEFORE_INVALID");
   const elapsedDelay = parseNonNegativeMinutes(
-    policy.delay_after_previous_minutes,
+    policy?.delay_after_previous_minutes,
     "ROUTE_PREVIOUS_DELAY_INVALID"
   );
   const workingDelay = parseNonNegativeMinutes(
-    policy.working_delay_after_previous_minutes,
+    policy?.working_delay_after_previous_minutes,
     "ROUTE_PREVIOUS_WORKING_DELAY_INVALID"
   );
 
@@ -158,8 +192,19 @@ export function resolveRouteStepTemporalEligibility(snapshot, step, options = {}
     );
   }
 
+  constraint = laterConstraint(
+    constraint,
+    dynamicSchedule?.eligibleAt || null,
+    "DYNAMIC_ELIGIBILITY"
+  );
+  constraint = laterConstraint(
+    constraint,
+    dynamicSchedule?.plannedStartAt || null,
+    "PLANNED_START"
+  );
+
   let eligibleAt = constraint?.at || now;
-  let reason = constraint?.reason || "TEMPORAL_POLICY_ELIGIBLE";
+  let reason = constraint?.reason || (policy ? "TEMPORAL_POLICY_ELIGIBLE" : "NO_TEMPORAL_POLICY");
 
   if (calendarCode) {
     const anchor = new Date(Math.max(now.getTime(), eligibleAt.getTime()));
@@ -177,6 +222,10 @@ export function resolveRouteStepTemporalEligibility(snapshot, step, options = {}
     eligible,
     evaluated_at: now.toISOString(),
     eligible_at: eligibleAt.toISOString(),
+    planned_start_at: dynamicSchedule?.plannedStartAt?.toISOString() || null,
+    dynamic_eligible_at: dynamicSchedule?.eligibleAt?.toISOString() || null,
+    schedule_source_code: dynamicSchedule?.sourceCode || null,
+    schedule_revision: dynamicSchedule?.revision || null,
     reason: eligible ? "ELIGIBLE" : reason,
     calendar_code: calendarCode
   };
