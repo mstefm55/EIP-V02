@@ -3,6 +3,8 @@ import {
   bindRouteStepInstance,
   coordinateProcessRoute
 } from "./processRouteCoordinator.js";
+import { resolveNextRouteStep } from "./processRoutePlanner.js";
+import { resolveRouteStepTemporalEligibility } from "./processRouteTemporalGate.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -62,14 +64,36 @@ export async function executeRouteStartAction(client, snapshot, action, options 
 
 export async function runProcessRouteTick(client, snapshot, options = {}) {
   const serviceObjectId = requireText(options.serviceObjectId, "SERVICE_OBJECT_ID_REQUIRED");
+  const nextStep = resolveNextRouteStep(snapshot);
+  let temporal = null;
+
+  if (nextStep?.state === "PENDING") {
+    temporal = resolveRouteStepTemporalEligibility(snapshot, nextStep, options);
+    if (!temporal.eligible) {
+      return {
+        snapshot,
+        temporal,
+        action: {
+          type: "WAIT_TIME",
+          service_object_id: serviceObjectId,
+          step_code: nextStep.step_code,
+          eligible_at: temporal.eligible_at,
+          reason: temporal.reason,
+          calendar_code: temporal.calendar_code
+        }
+      };
+    }
+  }
+
   const coordination = coordinateProcessRoute(snapshot, { serviceObjectId });
 
   if (coordination.action.type !== "START_PROCESS") {
-    return coordination;
+    return temporal ? { ...coordination, temporal } : coordination;
   }
 
-  return executeRouteStartAction(client, coordination.snapshot, coordination.action, {
+  const started = await executeRouteStartAction(client, coordination.snapshot, coordination.action, {
     ...options,
     serviceObjectId
   });
+  return temporal ? { ...started, temporal } : started;
 }
