@@ -224,3 +224,92 @@ test("route initialization snapshots governed temporal metadata without business
     delay_after_previous_minutes: 45
   });
 });
+
+test("pending step schedule can move earlier without route migration", async () => {
+  const snapshot = pendingSecond(null);
+  let starts = 0;
+
+  const laterPlan = await runProcessRouteTick({}, snapshot, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    now: "2026-08-31T10:00:00.000Z",
+    scheduleByStepCode: {
+      SECOND: {
+        planned_start_at: "2026-08-31T14:00:00.000Z",
+        source_code: "CURRENT_SCHEDULE",
+        revision: "41"
+      }
+    },
+    startProcess: async () => {
+      starts += 1;
+      throw new Error("SHOULD_NOT_START");
+    }
+  });
+
+  assert.equal(laterPlan.action.type, "WAIT_TIME");
+  assert.equal(laterPlan.action.eligible_at, "2026-08-31T14:00:00.000Z");
+  assert.equal(laterPlan.snapshot.steps[1].state, "PENDING");
+
+  const earlierPlan = await runProcessRouteTick({}, snapshot, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    now: "2026-08-31T11:00:00.000Z",
+    scheduleByStepCode: {
+      SECOND: {
+        planned_start_at: "2026-08-31T11:00:00.000Z",
+        source_code: "CURRENT_SCHEDULE",
+        revision: "42"
+      }
+    },
+    startProcess: async () => {
+      starts += 1;
+      return { ok: true, item: { id: "pi-second" }, reused: false };
+    }
+  });
+
+  assert.equal(earlierPlan.action.type, "PROCESS_STARTED");
+  assert.equal(earlierPlan.snapshot.steps[1].state, "ACTIVE");
+  assert.equal(earlierPlan.temporal.schedule_revision, "42");
+  assert.equal(starts, 1);
+});
+
+test("pending step schedule can move later while route remains unchanged", async () => {
+  const snapshot = pendingSecond(null);
+
+  const firstDecision = await runProcessRouteTick({}, snapshot, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    now: "2026-08-31T10:00:00.000Z",
+    scheduleByStepCode: {
+      SECOND: {
+        eligible_at: "2026-08-31T11:00:00.000Z",
+        source_code: "CURRENT_SCHEDULE",
+        revision: "7"
+      }
+    }
+  });
+
+  const delayedDecision = await runProcessRouteTick({}, snapshot, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    serviceObjectId: "so-1",
+    now: "2026-08-31T10:30:00.000Z",
+    scheduleByStepCode: {
+      SECOND: {
+        eligible_at: "2026-08-31T15:00:00.000Z",
+        source_code: "CURRENT_SCHEDULE",
+        revision: "8"
+      }
+    }
+  });
+
+  assert.equal(firstDecision.action.type, "WAIT_TIME");
+  assert.equal(firstDecision.action.eligible_at, "2026-08-31T11:00:00.000Z");
+  assert.equal(delayedDecision.action.type, "WAIT_TIME");
+  assert.equal(delayedDecision.action.eligible_at, "2026-08-31T15:00:00.000Z");
+  assert.equal(delayedDecision.snapshot.steps[1].state, "PENDING");
+  assert.equal(delayedDecision.temporal.schedule_revision, "8");
+});
