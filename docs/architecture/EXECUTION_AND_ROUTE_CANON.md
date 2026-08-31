@@ -1,10 +1,10 @@
 # EIP Execution and Route Canon
 
-Date: 2026-08-31
+Date: 2026-09-01
 
 Status: Canonical architecture guardrail approved for EIP Core V2 operating-model development.
 
-This document clarifies the responsibility split between governed business semantics, routing, reasoning, process execution, Effects, persistence, time, resources and audit. It must be read with `OPERATING_MODEL_CANON.md`, `TASK_EFFECT_MODEL.md`, `TEMPORAL_RESOURCE_V1.md`, and the Wave 3 orchestration contracts.
+This document clarifies the responsibility split between governed business semantics, routing, reasoning, process execution, Effects, persistence, planning/scheduling, time, resources and audit. It must be read with `OPERATING_MODEL_CANON.md`, `TASK_EFFECT_MODEL.md`, `TEMPORAL_RESOURCE_V1.md`, and the Wave 3 orchestration contracts.
 
 Security and authentication remain outside the current modelling wave.
 
@@ -27,13 +27,13 @@ WHAT NEXT
   = the Service Object's version-pinned route snapshot
 
 HOW
-  = Process Engine resolving Macro intent into governed Effects
+  = Process Engine resolving a Process step/transition into a governed Macro whose reasoning feeds ordered Effects
 
 WHERE
   = the appropriate kernel persistence structures: relational tables and governed JSONB according to lifecycle, integrity and query requirements
 
 WHEN
-  = temporal/scheduling resolution using governed calendars, dependencies, working time, capacity and scheduling policy
+  = governed Planning/Scheduling process logic using calendars, dependencies, working time, capacity, resources and scheduling policy; the accepted result is persisted on the route and later enforced by route maturity checks
 
 WHO / WITH WHAT
   = governed agents, workstations/resources, capabilities and assignments
@@ -50,23 +50,38 @@ These are responsibility boundaries, not separate domain engines.
 
 The Effect Library does not decide business workflow and the Process Engine does not contain hardcoded domain operations.
 
-The execution chain is:
+The canonical execution chain is:
 
 ```text
-Process Definition / transition
-  -> Macro
-  -> governed reasoning/resolution as needed
-  -> Effects
-  -> kernel objects
+PROCESS
+  -> STEP / TASK SEMANTICS
+  -> MACRO
+       -> governed reasoning / calculation / decision resolution as needed
+       -> ordered OBJECT_EFFECTS
+  -> OUTPUT / resulting state
+  -> next transition / next step
 ```
 
-The Process Engine orchestrates one Process Instance and resolves the governed Macro for a transition.
+The Process Engine orchestrates a Process Instance and resolves the governed Macro for the current transition/step intent.
 
-The Macro expresses the ordered execution intent.
+A Macro is the governed execution bundle for that process step/transition. It may calculate/resolve values and then use those calculated values as parameters for one or more Effects.
 
 Effects are the governed mutation boundary. They create, patch, transition, link or otherwise transform explicit kernel object families.
 
-Therefore `HOW = Process Engine + Macro + Effect Library`, not the Effect Library acting as a workflow engine by itself.
+Therefore the normal repeating Process Engine model is:
+
+```text
+INPUT
+  -> PROCESS STEP / TRANSITION
+  -> MACRO
+       -> logic / calculation / decisions
+       -> Effects
+  -> OUTPUT
+  -> NEXT STEP
+  -> repeat
+```
+
+Logic/decision resolution is not a separate workflow engine. Macro reasoning produces the values and decisions needed by the Macro's Effects and by the Process transition.
 
 ---
 
@@ -86,11 +101,11 @@ The current V1 route snapshot is stored under:
 service_object.attrs._eip_runtime.process_route_v1
 ```
 
-This remains a V1 implementation choice, not a permanent declaration that route persistence can never become relational.
+The saved route contains both pinned route identity/provenance and bounded mutable runtime projection such as route-step state and current schedule. This remains a V1 implementation choice, not a permanent declaration that route persistence can never become relational.
 
 ---
 
-## 4. `WHEN` refinement: calendar truth versus scheduling decision
+## 4. `WHEN` refinement: Planning/Scheduling calculates; route orchestration enforces
 
 A calendar answers questions such as:
 
@@ -99,22 +114,64 @@ A calendar answers questions such as:
 - how much working time exists between two instants?;
 - what working intervals are available after exceptions/overrides?
 
-The scheduler/temporal resolver uses that calendar truth together with route dependencies, earliest/latest dates, required duration, reservations, capacity and policy to determine whether a route step may start now and, if not, when it becomes eligible.
+Capacity/resource functions answer bounded questions about capable resources, required work and feasible slots.
+
+These are calculation tools. They do not own workflow.
+
+Scheduling is a governed subprocess of Planning. It normally runs according to the Planning cycle, but the same Scheduling process may also be triggered by an exception/emergency that requires replanning.
+
+Conceptually:
+
+```text
+NORMAL PLANNING CYCLE                  EXCEPTION / EMERGENCY
+        |                                      |
+        +------------------+-------------------+
+                           |
+                           v
+                 SCHEDULING PROCESS
+                           |
+                    STEP / TASK
+                           |
+                         MACRO
+                    +------+------+
+                    |             |
+              reasoning       Effects
+              calendar        patch accepted
+              capacity        schedule into
+              resources       route JSONB
+              policy
+                    |             |
+                    +------+------+ 
+                           |
+                           v
+                 persisted route schedule
+```
+
+The Scheduling Macro may compose the existing reasoning, calendar, work-requirement, capacity-slot and workstation/resource functions. A bounded generic optimization/solver capability is admitted only if ordinary composition is genuinely insufficient under the Generic Capability Admission Rule.
+
+The route orchestrator does **not** recalculate the schedule. It reads the current persisted schedule and enforces whether the next route process is mature for start.
 
 Therefore:
 
 ```text
-Calendar = working-time truth
-Scheduler/temporal resolver = start/finish eligibility decision
-```
+Calendar / capacity / resource functions
+  = governed calculation inputs
 
-Completion of one route step does not by itself authorize immediate start of the next step.
+Planning/Scheduling Process + Macro
+  = calculate/recalculate WHEN
+
+Effects
+  = persist accepted schedule/result
+
+Route Orchestrator
+  = consume/enforce the persisted WHEN
+```
 
 ### 4.1 Dynamic scheduling is not route migration
 
 The route defines `WHAT NEXT`; the current schedule defines `WHEN`.
 
-A Service Object may remain pinned to the same route while its pending-step schedule changes many times before execution.
+A Service Object may remain pinned to the same route while the schedule for its pending steps changes many times before execution.
 
 Conceptually:
 
@@ -126,42 +183,74 @@ schedule revision 41
   Execute planned 14:00
 
 current conditions change
+Planning/Scheduling is triggered again
 
 schedule revision 42
   Execute planned 11:00
 ```
 
+The new schedule is persisted back into the existing route projection through governed Effect execution. The Route Orchestrator consumes the latest persisted approved schedule on its next tick.
+
 That is replanning, not rerouting.
 
-Likewise, when several Service Objects compete for the same governed resource/capacity, a generic scheduler/work-allocation resolver may move one object earlier and another later as current facts change. The route coordinator consumes the resulting current per-step schedule; it must not contain business-specific reasons such as material delay, production order swap, patient urgency or vehicle priority.
-
-A dynamic planned/eligible instant is therefore an observation of the current schedule revision, not immutable route history. Hard policy constraints and completed execution history remain authoritative.
+Cross-object reprioritization is likewise a Planning/Scheduling concern. The route runtime must not contain business-specific reasons such as material delay, production order swap, patient urgency or vehicle priority.
 
 ---
 
-## 5. Service Object route ownership
+## 5. Service Object route ownership and initial scheduling order
 
 When a Service Object is created or otherwise reaches the governed trigger for route initialization, EIP resolves the applicable route once, snapshots the explicit Process Definition identities/versions and governed route provenance, and stores the result on the Service Object.
 
-Plain-English flow:
+The canonical order is:
 
 ```text
-Service Object created/triggered
+SERVICE OBJECT CREATED / TRIGGERED
   -> discover bounded candidate processes
   -> resolve which apply
   -> order them using governed route metadata
   -> pin Process Definition versions
   -> persist route snapshot on Service Object
-  -> orchestrate that saved route
+  -> Planning/Scheduling calculates dates/times for the route
+  -> governed Macro Effects patch the accepted schedule into the saved route
+  -> as each route process becomes mature, orchestration starts its pinned Process Instance
 ```
 
-The orchestrator follows the saved route. It does not rediscover/rebuild the route after each completed Process Instance.
+The orchestrator follows the saved route. It does not rediscover/rebuild the route after each completed Process Instance and it does not calculate the schedule itself.
 
 A deliberate route migration is the mechanism for changing an in-flight Service Object to a newly published route.
 
 ---
 
-## 6. Route progression
+## 6. Route schedule projection
+
+For V1, current scheduling output belongs to the saved route projection and is explicitly separate from pinned route identity metadata.
+
+Conceptually each route step may contain:
+
+```json
+{
+  "step_code": "EXECUTE",
+  "process_def_id": "...",
+  "process_version": 4,
+  "state": "PENDING",
+  "schedule_v1": {
+    "planned_start_at": "2026-09-04T08:00:00.000Z",
+    "planned_finish_at": "2026-09-04T16:00:00.000Z",
+    "source_code": "CURRENT_SCHEDULE",
+    "revision": "42"
+  }
+}
+```
+
+The schedule projection is mutable while the route step remains eligible for replanning under governed policy. Changing `schedule_v1` does not change the pinned Process Definition, version, route order or route provenance.
+
+Actual execution facts such as `completed_at` remain distinct from planned dates.
+
+Scheduling simulations/scenarios may calculate candidate schedules without executing the final mutation Effects. Only an accepted/live scheduling result is patched into the operational route.
+
+---
+
+## 7. Route maturity and progression
 
 Each route step has durable orchestration state. Conceptually:
 
@@ -176,24 +265,51 @@ SKIPPED
 A normal progression is:
 
 ```text
-current Process Instance completes
-  -> corresponding saved route step becomes COMPLETED
-  -> identify next saved PENDING step
-  -> obtain/recalculate its current temporal/resource schedule
-  -> evaluate start eligibility against current schedule + pinned policy
-  -> start now if eligible
-     OR remain waiting until eligible/replanned
-  -> bind/reuse Process Instance
-  -> persist updated route snapshot
+identify next saved PENDING step
+  -> read its current persisted schedule
+  -> if no accepted schedule exists: WAIT_SCHEDULE
+  -> if planned start is still in the future: WAIT_TIME
+  -> when the persisted planned start is reached and the route step is otherwise startable:
+       transition route step to ACTIVE
+       start/bind the pinned Process Instance
+  -> execute that Process through Process Step -> Macro -> reasoning + Effects -> output
+  -> when Process Instance completes, mark corresponding route step COMPLETED
+  -> inspect the next saved route step
 ```
 
-While a route step is still `PENDING`, its current schedule may move earlier or later as governed inputs change. The route step must not be transitioned to `ACTIVE` until the current eligibility decision permits start.
+The Route Orchestrator is an execution/maturity mechanism, not the scheduling algorithm.
+
+A pending step's persisted schedule may move earlier or later because the Planning/Scheduling process ran again. On its next tick the Route Orchestrator simply consumes the updated saved schedule.
 
 V1 retains one active inter-process route step at a time unless a separately approved cross-domain requirement justifies parallel route orchestration.
 
 ---
 
-## 7. Route publication and version behavior
+## 8. Normal versus emergency Scheduling trigger
+
+Normal Scheduling is subordinate to the Planning cycle.
+
+Emergency Scheduling uses the **same** governed Scheduling process but is invoked by an exception/replanning trigger, for example a generic resource/capacity/availability/blocking event that the governed process determines requires rescheduling.
+
+Do not create separate runtime engines such as `EmergencyScheduler`, `MaterialDelayScheduler`, `FleetScheduler`, or similar domain-specific schedulers.
+
+The difference is trigger/scope/policy input, not architecture:
+
+```text
+normal cycle
+  -> Planning
+  -> Scheduling
+
+exception/emergency
+  -> governed replanning trigger
+  -> same Scheduling process
+```
+
+Freeze/unfreeze, planning horizons, cross-object scope and optimization policies belong to the later Scheduling Architecture exercise and must not be guessed inside route runtime.
+
+---
+
+## 9. Route publication and version behavior
 
 Publishing a new route/configuration affects new route resolutions by default.
 
@@ -218,7 +334,7 @@ This guarantees that EIP can always answer which route an object actually execut
 
 ---
 
-## 8. Route migration
+## 10. Route migration
 
 Route migration is an explicit governed operation for in-progress Service Objects only.
 
@@ -244,26 +360,26 @@ The system must not guess equivalence between old and new route steps merely fro
 
 Where an active Process Instance exists, the default safe policy is to migrate at an approved boundary, normally after the current active step completes, unless an explicitly governed immediate-migration policy proves interruption safe.
 
-Changing only the current schedule of a pending step is not a route migration. Migration is required when the pinned route itself changes: Process Definition selection/version, route-step composition/order, or other governed route identity/provenance that defines `WHAT NEXT`.
+Changing only the persisted current schedule of a pending step is not a route migration. Migration is required when the pinned route itself changes: Process Definition selection/version, route-step composition/order, or other governed route identity/provenance that defines `WHAT NEXT`.
 
 ---
 
-## 9. No hardcoded business `what`
+## 11. No hardcoded business `what`
 
 Runtime code may implement generic mechanics such as:
 
 - bounded route loading;
 - version pinning;
 - state transitions;
-- temporal eligibility checks;
+- persisted schedule/maturity checks;
 - candidate limits;
 - idempotency;
 - transaction/locking behavior;
 - generic reasoning execution;
 - Effect dispatch;
-- generic candidate ranking/work allocation when separately admitted.
+- generic calculation/resolution functions admitted under the operating-model canon.
 
-Runtime code must not contain tenant/domain branches such as:
+Runtime route code must not contain tenant/domain branches such as:
 
 ```text
 if sales order then approval
@@ -273,16 +389,29 @@ if ecommerce then shipment
 if material late then swap orders
 ```
 
-Those belong in governed Process Definitions, metadata, Profile Packs, policies, current facts and reasoning/scheduling inputs.
+Those belong in governed Process Definitions, metadata, Profile Packs, policies, current facts and Planning/Scheduling reasoning inputs.
 
 ---
 
-## 10. Architecture consequence for current Wave 3 runtime
+## 12. Architecture consequence for current Wave 3 runtime
 
-Any runtime behavior that immediately starts the next route step solely because the previous Process Instance completed is incomplete relative to this canon.
+The route runtime must not become a hidden scheduler.
 
-The required correction is a generic temporal eligibility gate between route-step completion and next-process start. The gate must compose the existing calendar/temporal/resource primitives and consume current schedule projections rather than introducing domain-specific schedulers.
+The correct Wave 3 boundary is:
 
-The gate must also recalculate a pending step against current schedule input on each relevant orchestration tick; a previous `WAIT_TIME` result must not freeze derived eligibility.
+```text
+route initialization
+  -> save pinned route
 
-This is implementation alignment work, not a reason to change the canonical architecture.
+Planning/Scheduling Process
+  -> Macro reasoning using existing generic temporal/resource functions
+  -> Effects patch accepted route schedule
+
+route runtime
+  -> read persisted schedule
+  -> WAIT_SCHEDULE if absent
+  -> WAIT_TIME if planned start is future
+  -> start pinned Process Instance when mature
+```
+
+Any implementation that calculates route timing from calendars, capacity, previous-step delays or external schedule projections inside the Route Orchestrator is implementation drift and must be refactored back into the Planning/Scheduling Process + Macro boundary.
