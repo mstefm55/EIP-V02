@@ -7,10 +7,11 @@ function compactSql(sql) {
   return String(sql).replace(/\s+/g, " ").trim();
 }
 
-function createClient() {
+function createClient({ patchMode = false } = {}) {
   const state = {
     projectionQueries: 0,
     serviceObjectPatch: null,
+    serviceObjectPathPatch: null,
     processInstanceUpdated: false,
     queries: []
   };
@@ -64,12 +65,36 @@ function createClient() {
                         }
                       }
                     ],
-                    effects: [
-                      {
-                        type: "SO_UPDATE",
-                        attrs: { planned_quantity: "$calc.planned_quantity" }
-                      }
-                    ]
+                    effects: patchMode
+                      ? [
+                          {
+                            type: "SO_UPDATE",
+                            patches: [
+                              {
+                                op: "SET",
+                                path: [
+                                  "_eip_runtime",
+                                  "process_route_v1",
+                                  "steps",
+                                  "0",
+                                  "schedule_v1"
+                                ],
+                                value: {
+                                  planned_start_at: "2026-09-04T08:00:00.000Z",
+                                  planned_finish_at: "2026-09-04T16:00:00.000Z",
+                                  source_code: "CURRENT_SCHEDULE",
+                                  revision: "$calc.planned_quantity"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      : [
+                          {
+                            type: "SO_UPDATE",
+                            attrs: { planned_quantity: "$calc.planned_quantity" }
+                          }
+                        ]
                   }
                 }
               }
@@ -120,6 +145,17 @@ function createClient() {
         return { rowCount: 1, rows: [] };
       }
 
+      if (
+        compact.startsWith("UPDATE eip_core.service_object SET attrs = jsonb_set") ||
+        (compact.startsWith("UPDATE eip_core.service_object SET attrs = (") && compact.includes("jsonb_set"))
+      ) {
+        state.serviceObjectPathPatch = {
+          path: params[2],
+          value: JSON.parse(params[3])
+        };
+        return { rowCount: 1, rows: [{ id: "so-1" }] };
+      }
+
       if (compact.startsWith("UPDATE eip_core.process_instance SET cursor_json")) {
         state.processInstanceUpdated = true;
         return { rowCount: 1, rows: [] };
@@ -155,4 +191,36 @@ test("Process Engine executes bounded Macro reasoning and Effects consume $calc 
   assert.equal(Object.prototype.hasOwnProperty.call(result.entry.calculation, "calc"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result.entry, "calc"), false);
   assert.equal(result.entry.effects_applied[0].type, "SO_UPDATE");
+});
+
+test("SO_UPDATE path patches can persist a nested schedule projection from governed $calc", async () => {
+  const client = createClient({ patchMode: true });
+
+  const result = await advanceInstance(client, {
+    tenantId: "tenant-1",
+    identityId: "identity-1",
+    instanceId: "pi-1",
+    action: "plan",
+    payload: {},
+    idempotencyKey: "idem-route-schedule-1"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(client.state.projectionQueries, 1);
+  assert.deepEqual(client.state.serviceObjectPathPatch.path, [
+    "_eip_runtime",
+    "process_route_v1",
+    "steps",
+    "0",
+    "schedule_v1"
+  ]);
+  assert.deepEqual(client.state.serviceObjectPathPatch.value, {
+    planned_start_at: "2026-09-04T08:00:00.000Z",
+    planned_finish_at: "2026-09-04T16:00:00.000Z",
+    source_code: "CURRENT_SCHEDULE",
+    revision: 200
+  });
+  assert.equal(result.entry.effects_applied[0].type, "SO_UPDATE");
+  assert.equal(result.entry.effects_applied[0].patch_count, 1);
+  assert.equal(client.state.processInstanceUpdated, true);
 });
