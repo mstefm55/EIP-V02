@@ -3,6 +3,14 @@ import { EngineRenderer } from "./engine/renderer.jsx";
 import { registry } from "./engine/registry.jsx";
 import { resolveAsset } from "./engine/assetRegistry.js";
 import {
+  clearSelectionTarget as applyClearSelectionTarget,
+  createSelectionState,
+  readSelectionDetail,
+  readSelectionTarget,
+  setSelectionDetail as applySelectionDetail,
+  setSelectionTarget as applySelectionTarget,
+} from "./engine/selectionModel.js";
+import {
   readSurfaceSelectionHint,
   writeSurfaceSelectionHint,
 } from "./engine/surfaceCache.js";
@@ -77,10 +85,7 @@ function App() {
   const [surfaceCode, setSurfaceCodeState] = useState(null);
   const [workbenchRefreshNonce, setWorkbenchRefreshNonce] = useState(0);
   const [workbenchPanelTab, setWorkbenchPanelTab] = useState("");
-  const [selection, setSelection] = useState({
-    definition: null,
-    detail: null,
-  });
+  const [selectionState, setSelectionState] = useState(createSelectionState);
   const tenantId = auth.session?.tenant_id || null;
   const realm = auth.session?.realm || null;
   const handleUnauthenticatedSurfaceAccess = useCallback(() => {
@@ -108,16 +113,38 @@ function App() {
     setSurfaceCodeState(nextCode);
   }, [allowedSurfaceCodes]);
 
-  const selectDefinition = useCallback((definition) => {
-    setSelection({ definition: definition || null, detail: null });
+  const selectTarget = useCallback((targetName, value) => {
+    setSelectionState((prev) => applySelectionTarget(prev, targetName, value));
   }, []);
+
+  const setTargetDetail = useCallback((targetName, value) => {
+    setSelectionState((prev) => applySelectionDetail(prev, targetName, value));
+  }, []);
+
+  const clearTarget = useCallback((targetName) => {
+    setSelectionState((prev) => applyClearSelectionTarget(prev, targetName));
+  }, []);
+
+  const getTarget = useCallback(
+    (targetName) => readSelectionTarget(selectionState, targetName),
+    [selectionState]
+  );
+
+  const getTargetDetail = useCallback(
+    (targetName) => readSelectionDetail(selectionState, targetName),
+    [selectionState]
+  );
+
+  const selectDefinition = useCallback((definition) => {
+    selectTarget("definition", definition);
+  }, [selectTarget]);
 
   const setDefinitionDetail = useCallback((detail) => {
-    setSelection((prev) => ({ ...prev, detail: detail || null }));
-  }, []);
+    setTargetDetail("definition", detail);
+  }, [setTargetDetail]);
 
   const clearSelection = useCallback(() => {
-    setSelection({ definition: null, detail: null });
+    setSelectionState(createSelectionState());
   }, []);
 
   const requestWorkbenchRefresh = useCallback(() => {
@@ -187,6 +214,9 @@ function App() {
     onUnauthenticated: handleUnauthenticatedSurfaceAccess,
   });
 
+  const selectedDefinition = readSelectionTarget(selectionState, "definition");
+  const selectedDefinitionDetail = readSelectionDetail(selectionState, "definition");
+
   const ctx = useMemo(() => ({
     surfaceCode,
     setSurfaceCode,
@@ -195,8 +225,15 @@ function App() {
     surfaceMeta: surfaceState.surface?.attrs || {},
     auth,
     selection: {
-      definition: selection.definition,
-      detail: selection.detail,
+      targets: selectionState.targets,
+      details: selectionState.details,
+      getTarget,
+      getTargetDetail,
+      selectTarget,
+      setTargetDetail,
+      clearTarget,
+      definition: selectedDefinition,
+      detail: selectedDefinitionDetail,
       selectDefinition,
       setDefinitionDetail,
       clear: clearSelection,
@@ -210,12 +247,19 @@ function App() {
   }), [
     auth,
     clearSelection,
+    clearTarget,
+    getTarget,
+    getTargetDetail,
     requestWorkbenchRefresh,
     selectDefinition,
-    selection.definition,
-    selection.detail,
+    selectTarget,
+    selectedDefinition,
+    selectedDefinitionDetail,
+    selectionState.details,
+    selectionState.targets,
     setDefinitionDetail,
     setSurfaceCode,
+    setTargetDetail,
     surfaceCode,
     availableSurfaces,
     surfaceState.surface,
