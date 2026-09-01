@@ -5,6 +5,7 @@ import {
   executeProcessMacroReasoning,
   resolveCalculatedRef
 } from "./reasoning/processMacroBridge.js";
+import { patchServiceObjectAttrs } from "./serviceObjectJsonPatch.js";
 
 const TASK_STATUS_LIST_CODE = "TASK_STATUS";
 const DEFAULT_SO_STATUS_LIST_CODE = "SERVICE_OBJECT_STATUS";
@@ -319,7 +320,6 @@ async function getPrimaryAgentId(client, tenantId, identityId) {
     );
     return r.rows[0]?.agent_id ?? null;
   } catch (error) {
-    // Wave 3A keeps process routes boot-safe even when auth_identity_agent is not yet migrated.
     if (error?.code === "42P01") {
       return null;
     }
@@ -1635,21 +1635,42 @@ async function applyEffects(client, ctx, effects, payload) {
         attrsValue && typeof attrsValue === "object" && !Array.isArray(attrsValue)
           ? attrsValue
           : null;
+      const patchesValue = resolveDynamicValue(effect?.patches, ctx, payload);
+      const patches = Array.isArray(patchesValue) && patchesValue.length > 0 ? patchesValue : null;
+      const serviceObjectId =
+        normalizeOptionalText(resolveDynamicValue(effect?.service_object_id, ctx, payload)) ||
+        ctx.serviceObjectId;
 
-      if (!title && !attrs) throw new Error("SO_UPDATE_EMPTY");
+      if (!title && !attrs && !patches) throw new Error("SO_UPDATE_EMPTY");
 
-      await client.query(
-        `
-        UPDATE eip_core.service_object
-        SET title = COALESCE($3, title),
-            attrs = COALESCE(attrs,'{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
-            updated_at = now()
-        WHERE tenant_id=$1 AND id=$2
-        `,
-        [ctx.tenantId, ctx.serviceObjectId, title, attrs ? JSON.stringify(attrs) : null]
-      );
+      if (title || attrs) {
+        const result = await client.query(
+          `
+          UPDATE eip_core.service_object
+          SET title = COALESCE($3, title),
+              attrs = COALESCE(attrs,'{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
+              updated_at = now()
+          WHERE tenant_id=$1 AND id=$2
+          `,
+          [ctx.tenantId, serviceObjectId, title, attrs ? JSON.stringify(attrs) : null]
+        );
+        if (result.rowCount === 0) throw new Error("SERVICE_OBJECT_NOT_FOUND");
+      }
 
-      applied.push({ type });
+      let patchResult = null;
+      if (patches) {
+        patchResult = await patchServiceObjectAttrs(client, {
+          tenantId: ctx.tenantId,
+          serviceObjectId,
+          patches
+        });
+      }
+
+      applied.push({
+        type,
+        service_object_id: serviceObjectId,
+        patch_count: patchResult?.patch_count || 0
+      });
       continue;
     }
 
