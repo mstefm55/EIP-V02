@@ -4,6 +4,8 @@ Date: 2026-09-01
 
 Status: Wave 2 implementation contract under `OPERATING_MODEL_CANON.md`.
 
+Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the authoritative metadata ownership, APICS-derived planning vocabulary, batch-cycle standards, min/average/max load semantics and Planning/Scheduling Process boundary.
+
 ## 1. Purpose
 
 Wave 2 adds a small generic temporal/resource foundation without creating a scheduling domain engine and without adding new persistence tables.
@@ -21,6 +23,8 @@ This wave provides pure/bounded calculation functions that are invoked from Macr
 Calendar, workstation, capability and capacity contracts are represented as governed projections/metadata inputs for V1. No `calendar`, `workstation`, `capacity`, `schedule`, or domain-specific table is introduced by this wave.
 
 A relational structure may be proposed later only if usage proves that existing kernel structures and governed metadata cannot provide required integrity/query performance. Existing JSONB-to-relational promotion remains owner-controlled under `SPECIALIZED_APP_JSONB_SCALING_STRATEGY.md`.
+
+Master facts remain on their authoritative objects. In particular, machine/equipment facts belong to Asset projections, Process requirements belong to Process metadata, employee/person capability facts belong to Agent projections, material facts belong to Material and actual demand/route state belongs to the Service Object. Planning/Scheduling metadata describes how those facts are interpreted; it does not duplicate them as master data.
 
 ## 3. Calendar V1 contract
 
@@ -105,6 +109,7 @@ id
 capabilities[]
 mobility
 capacity{}
+process_standards{}
 calendar_layers[]
 reservations[]
 ```
@@ -121,6 +126,67 @@ minimum generic capacity dimensions
 The same resolver is validated against manufacturing, hospital and fleet projections.
 
 Persistence-side candidate queries must prefilter/index candidate sets before these JavaScript resolvers run. Loading all tenant resources and filtering them in memory violates the engine-load rule.
+
+### 6.1 Candidate-specific work duration
+
+`resolveCandidateWorkDuration` supports bounded candidate-specific work calculation.
+
+Existing/reference modes include:
+
+```text
+FIXED
+RATE
+BATCH_CYCLE
+```
+
+Rate-dependent workload remains dimensionally strict: workload units must match the governed candidate rate unit.
+
+`BATCH_CYCLE` composes Process-owned fixed components with Asset/process-specific standard components. Example:
+
+```text
+DYEING Process
+  PROCESS = 360 min
+
+Machine A Asset/process standard
+  FILL 48 + DRAIN 42 + CLEAN 30
+  -> 480 min total
+
+Machine B Asset/process standard
+  FILL 24 + DRAIN 36 + CLEAN 30
+  -> 450 min total
+```
+
+The Process remains the same; candidate duration changes because the Asset/process standard changes.
+
+### 6.2 Min / average / max load envelope
+
+An Asset/process standard may expose:
+
+```text
+unit
+min
+average
+max
+min_policy = SOFT | HARD
+```
+
+Semantics:
+
+```text
+max
+  hard feasibility ceiling; above-max fails closed
+
+min + HARD
+  hard feasibility floor; below-min fails closed
+
+min + SOFT
+  schedulable but reported BELOW_MIN
+
+average
+  preferred/typical planning load; not a hard feasibility boundary
+```
+
+The work result exposes bounded load provenance including status, ratio-to-average and ratio-to-max so a later Scheduling policy can optimize utilization/cost without moving those master facts into scheduling metadata.
 
 ## 7. Macro calculation bridge contract
 
@@ -205,4 +271,6 @@ The route runtime is specifically **not** the missing scheduler. Scheduling rema
 7. candidate/resource resolution stays bounded;
 8. reasoning audit is bounded and digest-based;
 9. route orchestration consumes persisted schedule rather than recalculating it;
-10. normal Planning-cycle scheduling and emergency rescheduling converge on the same governed Scheduling process.
+10. normal Planning-cycle scheduling and emergency rescheduling converge on the same governed Scheduling process;
+11. Process facts and Asset/Agent/Material/Service Object facts retain authoritative ownership;
+12. candidate-specific batch-cycle and load-envelope calculations fail closed on invalid units/ranges.
