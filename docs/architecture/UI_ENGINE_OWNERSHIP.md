@@ -13,6 +13,7 @@ Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the Planning/Scheduling d
   - primitive registry allowlist
   - primitive/composite separation enforcement in registry
   - contract/token resolution utilities
+  - generic bounded selection-state mechanics
   - auth/session transport + CSRF handling
   - asset key allowlist resolution
 - Metadata-owned platform shell/theme profile layer:
@@ -28,6 +29,7 @@ Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the Planning/Scheduling d
   - surface composition tree
   - node-level labels and layout hints
   - contract endpoint templates and runtime token references
+  - selection target names used to coordinate generic primitives
   - surface-level shell profile reference (`attrs.shell_profile_code`)
 - Server-owned:
   - authentication and authorization
@@ -55,6 +57,7 @@ Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the Planning/Scheduling d
   - `ContractTablePanel`
   - `ContractRecordEditor`
   - `ContractDetailEditor`
+  - `SelectionDetailPanel`
 - Legacy workbench composites may still exist in source as migration references, but must not remain registered runtime primitives/composites once equivalent metadata + generic primitive composition is active:
   - `ProcessDefinitionStudio`
   - `ProcessWorkbenchCatalog`
@@ -74,6 +77,51 @@ Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the Planning/Scheduling d
 - Engine runtime modules remain outside components:
   - `apps/workbench-ui/src/engine/*`
 - Keep this separation strict so primitive/composite authority is auditable and enforceable.
+
+## Generic Selection State Boundary
+
+Selection is UI coordination state only. It is not business state and it must not become domain-specific frontend authority.
+
+Canonical mechanism:
+
+```text
+metadata surface
+  -> primitive declares selection target name
+  -> table/list selects one bounded row into that target
+  -> another generic primitive reads the same target
+  -> API/Process/Effect remains authority for writes
+```
+
+Examples of valid target names:
+
+```text
+definition
+schedule_step
+service_object
+asset
+material
+agent
+```
+
+The target name is metadata. The React application must not require a new state field or source-code branch for each business object type.
+
+Compatibility:
+
+```text
+definition
+```
+
+remains supported for the existing Process Workbench while the generic target map becomes the canonical engine mechanism.
+
+Selection state rules:
+
+1. target names are normalized, bounded and reject prototype-pollution keys;
+2. each target has independent selected-record and optional detail state;
+3. replacing a selected record clears stale detail for that target only;
+4. switching surface or logging out clears all transient selections;
+5. selection values are runtime UI state only and are not persisted as business truth;
+6. metadata contracts may reference selected targets through bounded token scopes such as `selections.schedule_step.id`;
+7. selection cannot authorize a write; server permission/process rules remain authoritative.
 
 ## Tenant Scope Rules
 
@@ -162,17 +210,22 @@ SurfaceRoot
   -> PanelHeader
   -> SplitLayout
        -> ContractTablePanel
+            selection target = schedule_step
             route/process rows
             planned dates
             state/maturity
             schedule revision
-       -> ContractDetailEditor / ContractRecordEditor
-            selected Service Object
-            workload/capacity/load facts
-            resource/provenance facts
+       -> SelectionDetailPanel
+            reads schedule_step
+            selected Service Object/process identity
+            planned/actual timing
+            maturity/wait state
+            schedule provenance
 ```
 
-This deliberately uses existing generic primitives. A timeline/Gantt/capacity visual may be admitted later only as a domain-neutral primitive after the generic API projection is stable.
+This deliberately uses generic primitives. Workload/capacity/load/resource details may be added once those facts are exposed by bounded server projections; the UI must not fabricate them from local calculations.
+
+A timeline/Gantt/capacity visual may be admitted later only as a domain-neutral primitive after the generic API projection is stable.
 
 ### Generic visualization admission rule
 
@@ -198,10 +251,11 @@ Before declaring the UI Engine ready for the first user-facing surface:
 4. tenant/realm surface selection is server-derived and scoped;
 5. shell/theme profile resolution consumes published governed metadata;
 6. generic primitives cover table/list/detail/edit composition without domain composites;
-7. API projections carry business/process semantics so frontend code does not recreate them;
-8. Planning/Scheduling fields are presentation-only in the UI Engine;
-9. write actions continue through governed API/Process/Effect paths rather than direct frontend state authority;
-10. first surface can be defined mostly through `ui_surface` metadata.
+7. generic selection targets coordinate primitives without hardcoded business object state;
+8. API projections carry business/process semantics so frontend code does not recreate them;
+9. Planning/Scheduling fields are presentation-only in the UI Engine;
+10. write actions continue through governed API/Process/Effect paths rather than direct frontend state authority;
+11. first surface can be defined mostly through `ui_surface` metadata.
 
 ## Quality Check (Mandatory in UI Waves)
 
