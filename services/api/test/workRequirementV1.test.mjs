@@ -207,7 +207,9 @@ test("batch-cycle workstation ranking uses asset-specific cycle duration after l
     {
       anchor: "2026-09-07T08:00:00Z",
       direction: "FORWARD",
-      allow_split: false,
+      // This test is about candidate-specific duration/ranking, not contiguous-slot feasibility.
+      // Allow split placement so the 588-minute candidate remains in the comparison set.
+      allow_split: true,
       work_requirement: dyeBatchRequirement
     }
   );
