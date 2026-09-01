@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, describeApiError } from "../../services/apiClient.js";
 import { getPath, resolveContract } from "../../engine/contracts.js";
+import { normalizeSelectionTarget } from "../../engine/selectionModel.js";
 import StateNotice from "./StateNotice.jsx";
 
 function normalizeColumn(column) {
@@ -98,7 +99,26 @@ function resolveCardText(item, key, fallback = "-") {
 }
 
 function resolveSelectionTarget(ctx, targetName) {
-  const target = String(targetName || "").trim();
+  const target = normalizeSelectionTarget(targetName || "definition");
+  if (!target) {
+    return { selected: null, select: null, clear: null };
+  }
+
+  if (typeof ctx?.selection?.selectTarget === "function") {
+    const selected =
+      (typeof ctx?.selection?.getTarget === "function" && ctx.selection.getTarget(target)) ||
+      ctx?.selection?.targets?.[target] ||
+      null;
+    return {
+      selected,
+      select: (value) => ctx.selection.selectTarget(target, value),
+      clear:
+        typeof ctx?.selection?.clearTarget === "function"
+          ? () => ctx.selection.clearTarget(target)
+          : null,
+    };
+  }
+
   if (target === "definition") {
     return {
       selected: ctx?.selection?.definition || null,
@@ -106,6 +126,7 @@ function resolveSelectionTarget(ctx, targetName) {
       clear: ctx?.selection?.clear || null,
     };
   }
+
   return {
     selected: null,
     select: null,
@@ -165,12 +186,7 @@ function ContractTablePanel({ node, ctx }) {
   const selectionIdKey = String(selectionConfig?.key || "").trim();
   const selectionTarget = useMemo(
     () => resolveSelectionTarget(ctx, selectionConfig?.target),
-    [
-      ctx?.selection?.clear,
-      ctx?.selection?.definition,
-      ctx?.selection?.selectDefinition,
-      selectionConfig?.target,
-    ]
+    [ctx?.selection, selectionConfig?.target]
   );
   const selectionTargetRef = useRef(selectionTarget);
   useEffect(() => {
@@ -190,7 +206,6 @@ function ContractTablePanel({ node, ctx }) {
   }, [selectedRowId]);
 
   if (previousSelectedRowRef.current && !selectedRowId) {
-    // Capture explicit selection clear before load-side auto-select checks run.
     forceNewRef.current = true;
   }
   previousSelectedRowRef.current = selectedRowId;
@@ -217,12 +232,20 @@ function ContractTablePanel({ node, ctx }) {
       availableSurfaces: ctx?.availableSurfaces || [],
       selection: {
         definition: ctx?.selection?.definition || {},
+        targets: ctx?.selection?.targets || {},
       },
       auth: {
         session: ctx?.auth?.session || {},
       },
     }),
-    [ctx?.auth?.session, ctx?.availableSurfaces, ctx?.selection?.definition, ctx?.surfaceMeta, ctx?.surfaceProps]
+    [
+      ctx?.auth?.session,
+      ctx?.availableSurfaces,
+      ctx?.selection?.definition,
+      ctx?.selection?.targets,
+      ctx?.surfaceMeta,
+      ctx?.surfaceProps,
+    ]
   );
 
   const preloadedItems = useMemo(() => {
