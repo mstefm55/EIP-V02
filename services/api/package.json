@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env.v2.local --watch src/server.js",
     "start": "node --env-file-if-exists=.env.v2.local src/server.js",
-    "seed:auth": "node --env-file-if-exists=.env.v2.local scripts/bootstrap_v2_auth_seed.mjs",
+    "seed:auth": "node --env-file-if-exists=.env.v2.local scripts/bootstrap_v2_auth_seed_connection.mjs",
     "migrate:v2": "node --env-file-if-exists=.env.v2.local scripts/apply_v2_migrations.mjs",
     "seed:staging:smoke": "node --env-file-if-exists=.env.v2.staging scripts/seed_staging_smoke_identities.mjs",
     "test:auth:security": "node --env-file-if-exists=.env.v2.local scripts/test_auth_security_flow.mjs",
