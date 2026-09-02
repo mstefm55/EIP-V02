@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 function normalize(value) {
@@ -71,9 +71,12 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  process.stderr.write(`${JSON.stringify({ ok: false, error: error?.message || String(error) }, null, 2)}\n`);
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
+if (invokedPath === import.meta.url) {
+  main().catch((error) => {
+    process.stderr.write(`${JSON.stringify({ ok: false, error: error?.message || String(error) }, null, 2)}\n`);
+    process.exit(1);
+  });
+}
 
 export { applyPostgresUrlToEnv, resolveConnectionUrl };
