@@ -20,6 +20,7 @@ import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus }
 const DEFAULT_PORT = 4010;
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:5174"];
+const DEFAULT_BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
 function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -141,6 +142,12 @@ function buildRuntimeConfig(overrides = {}) {
     AUTH_LOGIN_FAILURE_THRESHOLD: parseInteger(process.env.AUTH_LOGIN_FAILURE_THRESHOLD, 8),
     AUTH_LOGIN_LOCK_MIN: parseInteger(process.env.AUTH_LOGIN_LOCK_MIN, 15),
     LOG_DEV_OTP: parseBoolean(process.env.LOG_DEV_OTP, false),
+    EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || null,
+    EMAIL_API_KEY: process.env.EMAIL_API_KEY || null,
+    EMAIL_API_BASE_URL: process.env.EMAIL_API_BASE_URL || DEFAULT_BREVO_API_URL,
+    EMAIL_FROM: process.env.EMAIL_FROM || null,
+    EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || null,
+    BREVO_API_KEY: process.env.BREVO_API_KEY || null,
     SMTP_HOST: process.env.SMTP_HOST || null,
     SMTP_PORT: parseInteger(process.env.SMTP_PORT, 587),
     SMTP_SECURE: parseBoolean(process.env.SMTP_SECURE, false),
