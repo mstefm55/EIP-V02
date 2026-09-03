@@ -298,6 +298,7 @@ function App() {
   if (!auth.authenticated) {
     return (
       <LoginPanel
+        onResolveOrganisations={auth.resolveOrganisations}
         onLogin={auth.login}
         onRequestOtp={auth.requestOtp}
         onLoginWithOtp={auth.loginWithOtp}
