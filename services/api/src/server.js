@@ -9,6 +9,7 @@ import dbPlugin from "./plugins/db.js";
 import authShellPlugin from "./plugins/authShell.js";
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
+import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
 import planningScheduleRoutes from "./routes/planning_schedule.js";
@@ -204,6 +205,7 @@ async function buildServer(options = {}) {
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
+  await app.register(authOrganisationRoutes, { prefix: "/api/eip" });
   await app.register(authRoutes, { prefix: "/api/eip" });
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
