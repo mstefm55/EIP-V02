@@ -14,8 +14,10 @@ import {
 import eipMark from "../../assets/branding/eip-modern-favicon.png";
 
 const DEFAULT_FORM = {
-  tenantCode: "v2seed",
-  login: "v2.workbench.admin",
+  tenantId: "",
+  tenantCode: "",
+  login: "",
+  identityLogin: "",
   password: "",
   totpCode: "",
 };
@@ -43,7 +45,18 @@ function extractTotpSecret(uriValue) {
   }
 }
 
+function organisationValue(organisation) {
+  return String(organisation?.code || organisation?.id || "").trim();
+}
+
+function organisationLabel(organisation) {
+  const name = String(organisation?.name || "").trim();
+  const code = String(organisation?.code || organisation?.id || "").trim();
+  return name && code && name !== code ? `${name} (${code})` : name || code;
+}
+
 function LoginPanel({
+  onResolveOrganisations,
   onLogin,
   onRequestOtp,
   onLoginWithOtp,
@@ -61,6 +74,9 @@ function LoginPanel({
   const [challengeId, setChallengeId] = useState(null);
   const [challengeExpiresAt, setChallengeExpiresAt] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [organisations, setOrganisations] = useState([]);
+  const [organisationStatus, setOrganisationStatus] = useState(null);
+  const [organisationLoading, setOrganisationLoading] = useState(false);
   const [totpSetup, setTotpSetup] = useState({
     uri: "",
     secret: "",
@@ -69,8 +85,9 @@ function LoginPanel({
   const [totpQrDataUrl, setTotpQrDataUrl] = useState("");
   const [requestForm, setRequestForm] = useState(DEFAULT_REQUEST_FORM);
   const [requestNotice, setRequestNotice] = useState(null);
+  const loginInputRef = useRef(null);
   const passwordInputRef = useRef(null);
-  const busy = loading || submitting;
+  const busy = loading || submitting || organisationLoading;
 
   const assuranceItems = useMemo(() => ([
     {
@@ -124,21 +141,97 @@ function LoginPanel({
     };
   }, [totpSetup.uri]);
 
-  function setDemoAccess() {
+  function applyOrganisation(organisation) {
+    if (!organisation) return;
+    const id = String(organisation.id || "").trim();
+    const code = String(organisation.code || "").trim();
+    const identityLogin = String(organisation.identity_login || organisation.login || "").trim();
     setForm((prev) => ({
       ...prev,
-      tenantCode: DEFAULT_FORM.tenantCode,
-      login: DEFAULT_FORM.login,
-      totpCode: "",
+      tenantId: id,
+      tenantCode: code || id,
+      identityLogin: identityLogin || prev.login,
     }));
-    setLocalNotice("Quick access is ready. Enter your password to continue.");
+  }
+
+  async function resolveOrganisations() {
+    const login = String(form.login || "").trim();
+    if (!login) {
+      setOrganisations([]);
+      setOrganisationStatus("Enter your email to load organisations.");
+      return [];
+    }
+    if (typeof onResolveOrganisations !== "function") {
+      setOrganisationStatus("Organisation lookup is unavailable.");
+      return [];
+    }
+
+    setOrganisationLoading(true);
     setLocalError(null);
-    requestAnimationFrame(() => passwordInputRef.current?.focus());
+    try {
+      const result = await onResolveOrganisations({
+        login,
+        password: String(form.password || ""),
+      });
+      if (!result?.ok) {
+        setOrganisations([]);
+        setForm((prev) => ({ ...prev, tenantId: "", tenantCode: "", identityLogin: "" }));
+        setOrganisationStatus(result?.error || "Unable to load organisations.");
+        return [];
+      }
+
+      const list = Array.isArray(result.organisations) ? result.organisations : [];
+      setOrganisations(list);
+      if (!list.length) {
+        setForm((prev) => ({ ...prev, tenantId: "", tenantCode: "", identityLogin: "" }));
+        setOrganisationStatus("No organisations found for this account.");
+        return [];
+      }
+
+      const currentTenant = String(form.tenantCode || form.tenantId || "").trim().toLowerCase();
+      const selected = list.find((organisation) => {
+        const code = String(organisation.code || "").trim().toLowerCase();
+        const id = String(organisation.id || "").trim().toLowerCase();
+        return currentTenant && (currentTenant === code || currentTenant === id);
+      }) || list[0];
+      applyOrganisation(selected);
+      setOrganisationStatus(`Found ${list.length} organisation${list.length === 1 ? "" : "s"}.`);
+      return list;
+    } finally {
+      setOrganisationLoading(false);
+    }
+  }
+
+  function handleOrganisationChange(value) {
+    const cleanValue = String(value || "").trim();
+    const selected = organisations.find((organisation) => {
+      const code = String(organisation.code || "").trim();
+      const id = String(organisation.id || "").trim();
+      return cleanValue === code || cleanValue === id;
+    });
+    if (selected) {
+      applyOrganisation(selected);
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      tenantId: "",
+      tenantCode: cleanValue,
+      identityLogin: "",
+    }));
+  }
+
+  function setDemoAccess() {
+    setForm(DEFAULT_FORM);
+    setOrganisations([]);
+    setOrganisationStatus(null);
+    setLocalNotice("Enter your email to load your organisations, then authenticate.");
+    setLocalError(null);
+    requestAnimationFrame(() => loginInputRef.current?.focus());
   }
 
   function openQuickAccess() {
     setDemoAccess();
-    setActiveModal("otp");
   }
 
   function openRequestAccess() {
@@ -285,14 +378,14 @@ function LoginPanel({
 
   function openForgot(event) {
     event.preventDefault();
-    const tenantCode = encodeURIComponent(String(form.tenantCode || "").trim() || "v2seed");
+    const tenantCode = encodeURIComponent(String(form.tenantCode || "").trim());
     const loginValue = encodeURIComponent(String(form.login || "").trim());
     window.location.href = `mailto:access@eipcore.local?subject=EIP%20Password%20Reset&body=Organisation:%20${tenantCode}%0ALogin:%20${loginValue}`;
   }
 
   function openRecovery(event) {
     event.preventDefault();
-    const tenantCode = encodeURIComponent(String(form.tenantCode || "").trim() || "v2seed");
+    const tenantCode = encodeURIComponent(String(form.tenantCode || "").trim());
     const loginValue = encodeURIComponent(String(form.login || "").trim());
     window.location.href = `mailto:access@eipcore.local?subject=EIP%20Recovery%20Access&body=Organisation:%20${tenantCode}%0ALogin:%20${loginValue}`;
   }
@@ -312,8 +405,14 @@ function LoginPanel({
     ? `Code expires at ${new Date(challengeExpiresAt).toLocaleTimeString()}.`
     : null;
   const otpEmail = String(form.login || "").trim();
-  const otpTenantCode = String(form.tenantCode || "").trim() || "v2seed";
-  const otpTenantLabel = `EIP Platform (${otpTenantCode})`;
+  const otpTenantCode = String(form.tenantCode || form.tenantId || "").trim();
+  const selectedOtpOrganisation = organisations.find((organisation) => {
+    const value = organisationValue(organisation);
+    return value === otpTenantCode || String(organisation.id || "").trim() === otpTenantCode;
+  });
+  const otpTenantLabel = selectedOtpOrganisation
+    ? organisationLabel(selectedOtpOrganisation)
+    : otpTenantCode || "Select organisation";
 
   return (
     <section className="authv1-shell">
@@ -392,12 +491,33 @@ function LoginPanel({
                   <Mail size={17} strokeWidth={1.9} />
                 </span>
                 <input
+                  ref={loginInputRef}
                   aria-label="Login"
                   value={form.login}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, login: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const login = event.target.value;
+                    setForm((prev) => ({
+                      ...prev,
+                      login,
+                      identityLogin: "",
+                      tenantId: "",
+                      tenantCode: "",
+                    }));
+                    setOrganisations([]);
+                    setOrganisationStatus(null);
+                    setChallengeId(null);
+                  }}
+                  onBlur={() => {
+                    if (String(form.login || "").trim()) void resolveOrganisations();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void resolveOrganisations();
+                    }
+                  }}
                   placeholder="ops@organisation.com"
+                  autoComplete="username"
                   required
                 />
               </div>
@@ -409,16 +529,34 @@ function LoginPanel({
                 <span className="authv1-input-icon" aria-hidden="true">
                   <Building2 size={17} strokeWidth={1.9} />
                 </span>
-                <input
-                  aria-label="Tenant Code"
-                  value={form.tenantCode}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, tenantCode: event.target.value }))
-                  }
-                  placeholder="Enter org name or code"
-                  required
-                />
+                {organisations.length ? (
+                  <select
+                    aria-label="Tenant Code"
+                    value={otpTenantCode}
+                    onChange={(event) => handleOrganisationChange(event.target.value)}
+                  >
+                    {organisations.map((organisation) => {
+                      const value = organisationValue(organisation);
+                      return (
+                        <option key={String(organisation.id || value)} value={value}>
+                          {organisationLabel(organisation)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                ) : (
+                  <input
+                    aria-label="Tenant Code"
+                    value={form.tenantCode}
+                    onChange={(event) => handleOrganisationChange(event.target.value)}
+                    placeholder="Enter org name or code"
+                    required
+                  />
+                )}
               </div>
+              {organisationStatus ? (
+                <p className="authv1-otp-delivery-note">{organisationStatus}</p>
+              ) : null}
             </label>
 
             <label className="authv1-field">
@@ -435,6 +573,7 @@ function LoginPanel({
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, password: event.target.value }))
                   }
+                  autoComplete="current-password"
                   required
                 />
                 <button
@@ -549,11 +688,18 @@ function LoginPanel({
                   className="authv1-otp-tenant-select"
                   aria-label="Organisation"
                   value={otpTenantCode}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, tenantCode: String(event.target.value || "").trim() }))
-                  }
+                  onChange={(event) => handleOrganisationChange(event.target.value)}
                 >
-                  <option value={otpTenantCode}>{otpTenantLabel}</option>
+                  {organisations.length ? organisations.map((organisation) => {
+                    const value = organisationValue(organisation);
+                    return (
+                      <option key={String(organisation.id || value)} value={value}>
+                        {organisationLabel(organisation)}
+                      </option>
+                    );
+                  }) : (
+                    <option value={otpTenantCode}>{otpTenantLabel}</option>
+                  )}
                 </select>
               </div>
             </label>
