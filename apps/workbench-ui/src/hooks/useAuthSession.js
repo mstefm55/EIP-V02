@@ -3,7 +3,7 @@ import { ApiError, apiFetch, describeApiError } from "../services/apiClient.js";
 
 function buildLoginPayload(form) {
   const payload = {
-    login: String(form.login || "").trim(),
+    login: String(form.identityLogin || form.login || "").trim(),
     password: String(form.password || ""),
   };
 
@@ -25,6 +25,21 @@ function normalizeSessionPayload(payload) {
     assurance: payload.assurance || null,
     expires_at: payload.expires_at || null,
     permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+  };
+}
+
+function normalizeOrganisation(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const id = String(payload.id || "").trim();
+  const code = String(payload.code || "").trim();
+  const name = String(payload.name || "").trim();
+  const identityLogin = String(payload.identity_login || payload.login || "").trim();
+  if (!id && !code) return null;
+  return {
+    id: id || null,
+    code: code || null,
+    name: name || code || id,
+    identity_login: identityLogin || null,
   };
 }
 
@@ -59,6 +74,35 @@ function useAuthSession() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const resolveOrganisations = useCallback(async ({ login, password } = {}) => {
+    const loginValue = String(login || "").trim().toLowerCase();
+    const passwordValue = String(password || "");
+    if (!loginValue) {
+      return { ok: false, organisations: [], error: "Enter your email to load organisations." };
+    }
+
+    try {
+      const response = await apiFetch("/api/eip/auth/organisations", {
+        method: "POST",
+        body: {
+          email: loginValue,
+          ...(passwordValue ? { password: passwordValue } : {}),
+        },
+      });
+      const organisations = Array.isArray(response?.organisations)
+        ? response.organisations.map(normalizeOrganisation).filter(Boolean)
+        : [];
+      return { ok: true, organisations };
+    } catch (err) {
+      return {
+        ok: false,
+        organisations: [],
+        error: describeApiError(err, "Unable to load organisations."),
+        errorCode: err instanceof ApiError ? err.payload?.error || null : null,
+      };
+    }
+  }, []);
 
   const login = useCallback(async (form) => {
     setError(null);
@@ -267,6 +311,7 @@ function useAuthSession() {
     error,
     authenticated: Boolean(session),
     refresh,
+    resolveOrganisations,
     login,
     requestOtp,
     loginWithOtp,
@@ -279,6 +324,7 @@ function useAuthSession() {
     loading,
     error,
     refresh,
+    resolveOrganisations,
     login,
     requestOtp,
     loginWithOtp,
@@ -291,4 +337,4 @@ function useAuthSession() {
   return value;
 }
 
-export { useAuthSession };
+export { buildLoginPayload, useAuthSession };
