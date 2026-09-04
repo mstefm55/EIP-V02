@@ -1,6 +1,17 @@
 import { normalizeInternalApiPath } from "./apiEndpointSecurity.js";
 
 const BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+const CSRF_ENDPOINT = "/api/eip/auth/csrf";
+const CSRF_ERROR_CODES = new Set(["CSRF_MISSING", "CSRF_MISMATCH", "CSRF_INVALID"]);
+const SESSION_MUTATING_PATHS = new Set([
+  "/api/eip/auth/login/password",
+  "/api/eip/auth/login/otp",
+  "/api/eip/auth/login/totp",
+  "/api/eip/auth/logout",
+]);
+
+let cachedCsrfToken = null;
+let csrfTokenPromise = null;
 
 class ApiError extends Error {
   constructor(status, payload, rawBody) {
@@ -14,9 +25,14 @@ class ApiError extends Error {
 }
 
 function readCookie(name) {
+  if (typeof document === "undefined") return null;
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  const match = String(document.cookie || "").match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function readLocalCsrfCookie() {
+  return readCookie("csrf") || readCookie("__Host-csrf") || null;
 }
 
 function buildUrl(path) {
@@ -44,9 +60,13 @@ function normalizeMethod(method) {
   return String(method || "GET").trim().toUpperCase();
 }
 
+function isFormDataBody(body) {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
 function buildRequestBody(body) {
   if (body === undefined) return undefined;
-  return JSON.stringify(body);
+  return isFormDataBody(body) ? body : JSON.stringify(body);
 }
 
 function shouldSendCsrf(method) {
@@ -68,43 +88,120 @@ function buildPath(path, query) {
   return path.includes("?") ? `${path}&${qs}` : `${path}?${qs}`;
 }
 
-async function apiFetchWithMeta(path, options = {}) {
+function extractCsrfToken(payload) {
+  const token = payload?.csrf || payload?.csrf_token || payload?.csrfToken || null;
+  return typeof token === "string" && token.trim() ? token.trim() : null;
+}
+
+function resetCsrfToken() {
+  cachedCsrfToken = null;
+  csrfTokenPromise = null;
+}
+
+async function getCsrfToken({ refresh = false } = {}) {
+  if (refresh) {
+    resetCsrfToken();
+  } else {
+    if (cachedCsrfToken) return cachedCsrfToken;
+    const localCookie = readLocalCsrfCookie();
+    if (localCookie) {
+      cachedCsrfToken = localCookie;
+      return localCookie;
+    }
+    if (csrfTokenPromise) return csrfTokenPromise;
+  }
+
+  csrfTokenPromise = (async () => {
+    try {
+      const response = await fetch(buildUrl(CSRF_ENDPOINT), {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        return readLocalCsrfCookie();
+      }
+      const { payload } = await parseBody(response);
+      const token = extractCsrfToken(payload) || readLocalCsrfCookie();
+      if (token) cachedCsrfToken = token;
+      return token || null;
+    } catch {
+      return readLocalCsrfCookie();
+    } finally {
+      csrfTokenPromise = null;
+    }
+  })();
+
+  return csrfTokenPromise;
+}
+
+function shouldResetCsrfAfterSuccess(path, method) {
+  if (method === "GET" || method === "HEAD") return false;
+  return SESSION_MUTATING_PATHS.has(String(path || "").split("?")[0]);
+}
+
+async function performRequest(path, options, { refreshCsrf = false } = {}) {
   const url = buildUrl(path);
   const method = normalizeMethod(options.method);
   const headers = {
     ...(options.headers || {}),
   };
   const hasBody = options.body !== undefined;
+  const isFormData = isFormDataBody(options.body);
 
-  if (hasBody) {
+  if (hasBody && !isFormData && !headers["Content-Type"] && !headers["content-type"]) {
     headers["Content-Type"] = "application/json";
   }
 
   if (shouldSendCsrf(method)) {
-    const csrf = readCookie("csrf");
+    const csrf = await getCsrfToken({ refresh: refreshCsrf });
     if (csrf) headers["x-csrf"] = csrf;
   }
 
-  const response = await fetch(url, {
+  return fetch(url, {
     method,
     headers,
     credentials: "include",
     body: hasBody ? buildRequestBody(options.body) : undefined,
+    signal: options.signal,
+    cache: options.cache,
   });
+}
+
+async function apiFetchWithMeta(path, options = {}) {
+  const method = normalizeMethod(options.method);
+  let response = await performRequest(path, options);
 
   if (response.status === 304) {
     return { status: 304, headers: response.headers, data: null };
   }
 
-  const { payload, rawBody } = await parseBody(response);
+  let parsed = await parseBody(response);
+  if (!response.ok && CSRF_ERROR_CODES.has(parsed.payload?.error)) {
+    response = await performRequest(path, options, { refreshCsrf: true });
+    if (response.status === 304) {
+      return { status: 304, headers: response.headers, data: null };
+    }
+    parsed = await parseBody(response);
+  }
+
   if (!response.ok) {
-    throw new ApiError(response.status, payload, rawBody);
+    if (response.status === 401) resetCsrfToken();
+    throw new ApiError(response.status, parsed.payload, parsed.rawBody);
+  }
+
+  const payloadToken = extractCsrfToken(parsed.payload);
+  if (payloadToken) {
+    cachedCsrfToken = payloadToken;
+  } else if (shouldResetCsrfAfterSuccess(path, method)) {
+    resetCsrfToken();
   }
 
   return {
     status: response.status,
     headers: response.headers,
-    data: payload,
+    data: parsed.payload,
   };
 }
 
@@ -120,6 +217,11 @@ function describeApiError(error, fallback = "Request failed.") {
 
   const code = error.payload?.error;
   if (code === "UNAUTHENTICATED") return "Session expired. Please sign in again.";
+  if (code === "STEP_UP_REQUIRED") return "Additional verification is required. Use OTP or TOTP to continue.";
+  if (code === "ORIGIN_FORBIDDEN") return "This sign-in origin is not allowed.";
+  if (code === "CSRF_MISSING" || code === "CSRF_MISMATCH" || code === "CSRF_INVALID") {
+    return "Security verification expired. Please retry the action.";
+  }
   if (code === "PERMISSION_REQUIRED") {
     const required = Array.isArray(error.payload?.required_permissions)
       ? error.payload.required_permissions.join(", ")
@@ -160,4 +262,6 @@ export {
   buildQuery,
   buildUrl,
   describeApiError,
+  getCsrfToken,
+  resetCsrfToken,
 };
