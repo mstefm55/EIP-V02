@@ -7,8 +7,10 @@ import path from "node:path";
 
 import dbPlugin from "./plugins/db.js";
 import authShellPlugin from "./plugins/authShell.js";
+import authTransportHardeningPlugin from "./plugins/authTransportHardening.js";
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
+import authSessionTransportRoutes from "./routes/auth_session_transport.js";
 import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
@@ -117,6 +119,7 @@ function buildRuntimeConfig(overrides = {}) {
     AUTH_COOKIE_SAMESITE: process.env.AUTH_COOKIE_SAMESITE || "lax",
     AUTH_COOKIE_PATH: process.env.AUTH_COOKIE_PATH || "/",
     AUTH_COOKIE_DOMAIN: process.env.AUTH_COOKIE_DOMAIN || null,
+    AUTH_COOKIE_PARTITIONED: parseBoolean(process.env.AUTH_COOKIE_PARTITIONED, false),
     AUTH_SESSION_TTL_MIN: parseInteger(process.env.AUTH_SESSION_TTL_MIN, 720),
     AUTH_SESSION_IDLE_TTL_MIN: parseInteger(process.env.AUTH_SESSION_IDLE_TTL_MIN, 120),
     AUTH_SESSION_TOUCH_INTERVAL_SEC: parseInteger(process.env.AUTH_SESSION_TOUCH_INTERVAL_SEC, 300),
@@ -209,11 +212,13 @@ async function buildServer(options = {}) {
 
   await app.register(dbPlugin);
   await app.register(authShellPlugin);
+  await app.register(authTransportHardeningPlugin);
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
   await app.register(authOrganisationRoutes, { prefix: "/api/eip" });
   await app.register(authRoutes, { prefix: "/api/eip" });
+  await app.register(authSessionTransportRoutes, { prefix: "/api/eip" });
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
   await app.register(ownerAdminModuleRoutes, { prefix: "/api/eip" });
