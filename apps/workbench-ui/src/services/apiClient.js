@@ -1,6 +1,8 @@
 import { normalizeInternalApiPath } from "./apiEndpointSecurity.js";
 
-const BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+// Production auth/session transport is same-origin through the workbench runtime proxy.
+// Direct cross-origin API URLs remain available for local development only.
+const BASE_URL = import.meta.env?.DEV ? (import.meta.env?.VITE_API_BASE_URL || "") : "";
 const CSRF_ENDPOINT = "/api/eip/auth/csrf";
 const CSRF_ERROR_CODES = new Set(["CSRF_MISSING", "CSRF_MISMATCH", "CSRF_INVALID"]);
 const SESSION_MUTATING_PATHS = new Set([
