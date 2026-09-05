@@ -22,3 +22,12 @@ test("auth hook sends organisation lookup to API and uses resolved canonical ide
   assert.match(source, /form\.identityLogin \|\| form\.login/);
   assert.match(source, /identity_login/);
 });
+
+test("auth flow de-duplicates organisation lookups and refreshes session without login-screen flicker", async () => {
+  const source = await readFile(authHookPath, "utf8");
+
+  assert.match(source, /organisationLookupCacheRef/);
+  assert.match(source, /organisationLookupInFlightRef/);
+  assert.match(source, /refresh\(\{ silent: true \}\)/);
+  assert.match(source, /if \(!silent\) setLoading\(true\)/);
+});
