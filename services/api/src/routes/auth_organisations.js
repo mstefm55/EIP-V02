@@ -1,3 +1,4 @@
+// Railway redeploy marker: organisation parity repair validated.
 import { verifyPassword } from "../auth/password.js";
 
 const ORG_LOOKUP_RATE_LIMIT = { max: 10, timeWindow: "1 minute" };
