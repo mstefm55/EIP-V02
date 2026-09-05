@@ -1,4 +1,3 @@
-// Railway redeploy marker: organisation parity repair validated.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiFetch, describeApiError } from "../services/apiClient.js";
 
@@ -49,9 +48,11 @@ function useAuthSession() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const idleTimeoutRef = useRef(null);
+  const organisationLookupCacheRef = useRef(new Map());
+  const organisationLookupInFlightRef = useRef(new Map());
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const payload = await apiFetch("/api/eip/auth/whoami");
@@ -68,7 +69,7 @@ function useAuthSession() {
       setError(message);
       return { ok: false, error: message };
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -83,26 +84,54 @@ function useAuthSession() {
       return { ok: false, organisations: [], error: "Enter your email to load organisations." };
     }
 
-    try {
-      const response = await apiFetch("/api/eip/auth/organisations", {
-        method: "POST",
-        body: {
-          email: loginValue,
-          ...(passwordValue ? { password: passwordValue } : {}),
-        },
-      });
-      const organisations = Array.isArray(response?.organisations)
-        ? response.organisations.map(normalizeOrganisation).filter(Boolean)
-        : [];
-      return { ok: true, organisations };
-    } catch (err) {
+    const cacheKey = loginValue;
+    if (!passwordValue && organisationLookupCacheRef.current.has(cacheKey)) {
       return {
-        ok: false,
-        organisations: [],
-        error: describeApiError(err, "Unable to load organisations."),
-        errorCode: err instanceof ApiError ? err.payload?.error || null : null,
+        ok: true,
+        organisations: organisationLookupCacheRef.current.get(cacheKey),
+        cached: true,
       };
     }
+
+    if (!passwordValue && organisationLookupInFlightRef.current.has(cacheKey)) {
+      return organisationLookupInFlightRef.current.get(cacheKey);
+    }
+
+    const lookupPromise = (async () => {
+      try {
+        const response = await apiFetch("/api/eip/auth/organisations", {
+          method: "POST",
+          body: {
+            email: loginValue,
+            ...(passwordValue ? { password: passwordValue } : {}),
+          },
+        });
+        const organisations = Array.isArray(response?.organisations)
+          ? response.organisations.map(normalizeOrganisation).filter(Boolean)
+          : [];
+        if (!passwordValue) {
+          organisationLookupCacheRef.current.set(cacheKey, organisations);
+        }
+        return { ok: true, organisations };
+      } catch (err) {
+        return {
+          ok: false,
+          organisations: [],
+          error: describeApiError(err, "Unable to load organisations."),
+          errorCode: err instanceof ApiError ? err.payload?.error || null : null,
+        };
+      } finally {
+        if (!passwordValue) {
+          organisationLookupInFlightRef.current.delete(cacheKey);
+        }
+      }
+    })();
+
+    if (!passwordValue) {
+      organisationLookupInFlightRef.current.set(cacheKey, lookupPromise);
+    }
+
+    return lookupPromise;
   }, []);
 
   const login = useCallback(async (form) => {
@@ -113,7 +142,7 @@ function useAuthSession() {
         method: "POST",
         body: payload,
       });
-      const refreshed = await refresh();
+      const refreshed = await refresh({ silent: true });
       if (!refreshed.ok) {
         return {
           ok: false,
@@ -143,6 +172,8 @@ function useAuthSession() {
       setError(message);
     } finally {
       setSession(null);
+      organisationLookupCacheRef.current.clear();
+      organisationLookupInFlightRef.current.clear();
     }
   }, []);
 
@@ -178,7 +209,7 @@ function useAuthSession() {
         method: "POST",
         body: payload,
       });
-      const refreshed = await refresh();
+      const refreshed = await refresh({ silent: true });
       if (!refreshed.ok) {
         return { ok: false, error: "OTP login succeeded but session refresh failed." };
       }
@@ -201,7 +232,7 @@ function useAuthSession() {
         method: "POST",
         body: payload,
       });
-      const refreshed = await refresh();
+      const refreshed = await refresh({ silent: true });
       if (!refreshed.ok) {
         return { ok: false, error: "TOTP login succeeded but session refresh failed." };
       }
