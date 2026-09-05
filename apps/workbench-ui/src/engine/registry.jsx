@@ -5,6 +5,8 @@ import Tabs from "../components/primitives/Tabs.jsx";
 import ContractDetailEditor from "../components/primitives/ContractDetailEditor.jsx";
 import ContractTablePanel from "../components/primitives/ContractTablePanel.jsx";
 import ContractRecordEditor from "../components/primitives/ContractRecordEditor.jsx";
+import ContractMetricGrid from "../components/primitives/ContractMetricGrid.jsx";
+import NoticePanel from "../components/primitives/NoticePanel.jsx";
 import SelectionDetailPanel from "../components/primitives/SelectionDetailPanel.jsx";
 import FallbackNode from "../components/primitives/FallbackNode.jsx";
 
@@ -37,6 +39,14 @@ const primitiveLibrary = Object.freeze({
   ContractDetailEditor: Object.freeze({
     component: ContractDetailEditor,
     contract: "contract_detail_editor_v1",
+  }),
+  ContractMetricGrid: Object.freeze({
+    component: ContractMetricGrid,
+    contract: "contract_metric_grid_v1",
+  }),
+  NoticePanel: Object.freeze({
+    component: NoticePanel,
+    contract: "notice_panel_v1",
   }),
   SelectionDetailPanel: Object.freeze({
     component: SelectionDetailPanel,
