@@ -10,7 +10,7 @@ It must be read together with `KERNEL_CANON.md`, `SERVICE_OBJECT_CANON.md`, `OPE
 2. **Task label / process semantics**: human/business-facing wording associated with process intent.
 3. **Macro**: reusable ordered execution bundle attached to lifecycle intent.
 4. **Object_Effect Library**: standardized governed transformations applied to explicit kernel object families.
-5. **Object**: the governed runtime object receiving the transformation, including Service Object and Task where applicable.
+5. **Object**: the governed runtime object receiving the transformation, including Service Object, Task and Object Link where applicable.
 
 These layers are complementary and must remain separate.
 
@@ -74,6 +74,7 @@ TASK_STATE_TRANSITION
 
 INFO_RECORD_CREATE
 LINK_CREATE
+LINK_PATCH
 LINK_REMOVE
 PROCESS_START
 ```
@@ -98,11 +99,12 @@ One Effect may execute multiple internal functions or database statements when a
 Examples:
 
 - a state transition may validate, lock, update state, and write mandatory status history;
-- creation may validate required kernel invariants and insert one governed object atomically.
+- creation may validate required kernel invariants and insert one governed object atomically;
+- a bounded link patch may update relationship metadata while preserving relationship identity.
 
 An Effect must not combine independent externally meaningful transformations merely for convenience.
 
-Multi-child creation, relationship creation, quantity planning, allocation, integration storage, or similar sequencing belongs in a Macro composed from primitives.
+Multi-child creation, relationship creation plus unrelated mutation, quantity planning, allocation decisions, integration storage, or similar sequencing belongs in a Macro composed from primitives.
 
 ## What must not become Effects
 
@@ -126,7 +128,7 @@ INVENTORY_CONVERT
 VARIANT_INVENTORY_VALIDATE
 ```
 
-These are compositions of process semantics, governed reasoning, and generic Object_Effects.
+These are compositions of process semantics, governed reasoning, resolvers and generic Object_Effects.
 
 ## Child Service Object rule
 
@@ -139,6 +141,25 @@ Create a child Service Object only when the child requires durable independent i
 Arithmetic decomposition alone does not justify a child object.
 
 A canonical `SERVICE_OBJECT_CREATE` Effect creates one governed Service Object. If a business decomposition requires several children and relationships, the Macro composes repeated `SERVICE_OBJECT_CREATE` and `LINK_CREATE` operations rather than hiding the decomposition inside one specialized Effect identity.
+
+## Service Object patch boundary
+
+`SERVICE_OBJECT_PATCH` owns bounded non-lifecycle mutation of one Service Object. Its frozen V1 scope is:
+
+```text
+code
+title
+owner_agent_id
+bounded attrs SET/REMOVE paths
+```
+
+`status` is not patchable and belongs to `SERVICE_OBJECT_STATE_TRANSITION`. `object_type` is not patchable by this primitive. Free-form attrs merge is not part of the canonical contract.
+
+## Object Link patch boundary
+
+`LINK_PATCH` updates only governed relationship metadata (`object_link.attrs`) using bounded `SET` / `REMOVE` paths. The relationship identity (`src_kind`, `src_id`, `dst_kind`, `dst_id`, `relation_type`) is supplied as the selector and cannot be changed by the patch Effect.
+
+This lets materially different domains update relationship facts such as allocation quantity or effective dates without inventing business Effects or deleting/recreating the relationship.
 
 ## Effect governance
 
@@ -177,7 +198,7 @@ Do not add a new reasoning primitive when the requirement can be expressed clean
 
 ## Primitive expansion gate
 
-Effect Library Primitive V1 is frozen as a public vocabulary. Adding a new canonical primitive requires the full primitive-admission test recorded in `EFFECT_LIBRARY_PRIMITIVE_V1.md`, including cross-domain reuse, explicit object-family scope, bounded parameters, generic handler identity, Process/Macro separation, governed metadata admission and fail-closed tests.
+Effect Library Primitive V1 is frozen as a public vocabulary by the forward freeze migration `v2_0038_effect_library_primitive_v1_freeze.sql`. Adding a new canonical primitive requires the full primitive-admission test recorded in `EFFECT_LIBRARY_PRIMITIVE_V1.md`, including cross-domain reuse, explicit object-family scope, bounded parameters, generic handler identity, Process/Macro separation, governed metadata admission and fail-closed tests.
 
 ## Drift rule
 
