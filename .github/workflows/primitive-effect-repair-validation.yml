@@ -30,6 +30,11 @@ jobs:
       - name: Syntax check Process Engine
         run: node --check services/api/src/core/core_process_engine.js
 
+      - name: Audit graph Effect references in repository
+        run: |
+          echo "=== graph-like Effect references ==="
+          git grep -nE '"type"[[:space:]]*:[[:space:]]*"(CHILD_SERVICE_OBJECT_CREATE|STATUS_SET|SO_UPDATE|TASK_UPDATE|INFO_RECORD_WRITE|INSTANCE_START|ACCESS_GRANT_UPDATE|HTTP_REQUEST|API_CALL|INVENTORY_MOVE|INVENTORY_CONSUME|INVENTORY_PRODUCE|INVENTORY_CONVERT|VARIANT_INVENTORY_VALIDATE|JSON_MERGE|ATTRS_MERGE)"' -- db services apps docs || true
+
       - name: Install API dependencies
         working-directory: services/api
         run: npm ci
