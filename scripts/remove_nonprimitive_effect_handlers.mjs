@@ -85,6 +85,11 @@ removeRange(
   'const EFFECT_HANDLER_REGISTRY = {'
 );
 
+removeExact(
+  "HTTP integration Effect registry entry",
+  '  HTTP_REQUEST: "httpRequest"\n'
+);
+
 removeRange(
   "material lot resolver helper",
   'async function resolveMaterialLotRow(client, tenantId, params) {',
@@ -100,6 +105,12 @@ removeRange(
 removeRange(
   "variant and inventory business Effect handlers",
   '    if (type === "VARIANT_INVENTORY_VALIDATE") {',
+  '    if (type === "SERVICE_OBJECT_PATCH" || type === "SO_UPDATE") {'
+);
+
+removeRange(
+  "HTTP integration Effect handler",
+  '    if (type === "HTTP_REQUEST") {',
   '    if (type === "SERVICE_OBJECT_PATCH" || type === "SO_UPDATE") {'
 );
 
