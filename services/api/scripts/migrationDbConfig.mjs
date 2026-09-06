@@ -29,7 +29,9 @@ function resolveSslConfig(env = process.env) {
 }
 
 function resolveDbConfig(env = process.env) {
-  const connectionString = normalizeString(env.DATABASE_URL);
+  const connectionString = normalizeString(
+    pick(env.V2_DATABASE_URL, env.DATABASE_URL, env.DATABASE_PUBLIC_URL)
+  );
   const ssl = resolveSslConfig(env);
 
   if (connectionString) {
@@ -44,7 +46,7 @@ function resolveDbConfig(env = process.env) {
 
   if (isProduction && !host) {
     throw new Error(
-      "Migration database configuration requires DATABASE_URL or an explicit database host in production"
+      "Migration database configuration requires V2_DATABASE_URL, DATABASE_URL, DATABASE_PUBLIC_URL, or an explicit database host in production"
     );
   }
 
@@ -68,7 +70,9 @@ function resolveDbConfig(env = process.env) {
 function redactConnectionSecrets(value, env = process.env) {
   let text = String(value ?? "");
   const secretValues = [
+    env.V2_DATABASE_URL,
     env.DATABASE_URL,
+    env.DATABASE_PUBLIC_URL,
     env.DATABASE_PASSWORD,
     env.DB_PASSWORD,
     env.PGPASSWORD,

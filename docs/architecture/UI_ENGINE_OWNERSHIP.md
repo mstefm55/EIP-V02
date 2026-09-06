@@ -4,6 +4,8 @@
 
 Define the production ownership boundaries for the V2 UI engine runtime.
 
+Read with `PLANNING_AND_SCHEDULING_METADATA_V1.md` for the Planning/Scheduling data that may be presented by the UI without moving planning authority into frontend code.
+
 ## Ownership Model
 
 - Code-owned:
@@ -11,6 +13,7 @@ Define the production ownership boundaries for the V2 UI engine runtime.
   - primitive registry allowlist
   - primitive/composite separation enforcement in registry
   - contract/token resolution utilities
+  - generic bounded selection-state mechanics
   - auth/session transport + CSRF handling
   - asset key allowlist resolution
 - Metadata-owned platform shell/theme profile layer:
@@ -26,11 +29,13 @@ Define the production ownership boundaries for the V2 UI engine runtime.
   - surface composition tree
   - node-level labels and layout hints
   - contract endpoint templates and runtime token references
+  - selection target names used to coordinate generic primitives
   - surface-level shell profile reference (`attrs.shell_profile_code`)
 - Server-owned:
   - authentication and authorization
   - tenant/realm scoping
   - process/workflow lifecycle authority
+  - Planning/Scheduling calculation and accepted schedule authority
   - response boundary and governed metadata enforcement
 
 ## Primitive Library Boundary
@@ -47,9 +52,12 @@ Define the production ownership boundaries for the V2 UI engine runtime.
 - Current generic primitive examples:
   - `SurfaceRoot`
   - `PanelHeader`
+  - `SplitLayout`
+  - `Tabs`
   - `ContractTablePanel`
   - `ContractRecordEditor`
   - `ContractDetailEditor`
+  - `SelectionDetailPanel`
 - Legacy workbench composites may still exist in source as migration references, but must not remain registered runtime primitives/composites once equivalent metadata + generic primitive composition is active:
   - `ProcessDefinitionStudio`
   - `ProcessWorkbenchCatalog`
@@ -69,6 +77,51 @@ Define the production ownership boundaries for the V2 UI engine runtime.
 - Engine runtime modules remain outside components:
   - `apps/workbench-ui/src/engine/*`
 - Keep this separation strict so primitive/composite authority is auditable and enforceable.
+
+## Generic Selection State Boundary
+
+Selection is UI coordination state only. It is not business state and it must not become domain-specific frontend authority.
+
+Canonical mechanism:
+
+```text
+metadata surface
+  -> primitive declares selection target name
+  -> table/list selects one bounded row into that target
+  -> another generic primitive reads the same target
+  -> API/Process/Effect remains authority for writes
+```
+
+Examples of valid target names:
+
+```text
+definition
+schedule_step
+service_object
+asset
+material
+agent
+```
+
+The target name is metadata. The React application must not require a new state field or source-code branch for each business object type.
+
+Compatibility:
+
+```text
+definition
+```
+
+remains supported for the existing Process Workbench while the generic target map becomes the canonical engine mechanism.
+
+Selection state rules:
+
+1. target names are normalized, bounded and reject prototype-pollution keys;
+2. each target has independent selected-record and optional detail state;
+3. replacing a selected record clears stale detail for that target only;
+4. switching surface or logging out clears all transient selections;
+5. selection values are runtime UI state only and are not persisted as business truth;
+6. metadata contracts may reference selected targets through bounded token scopes such as `selections.schedule_step.id`;
+7. selection cannot authorize a write; server permission/process rules remain authoritative.
 
 ## Tenant Scope Rules
 
@@ -106,6 +159,103 @@ Define the production ownership boundaries for the V2 UI engine runtime.
 - Theme token overrides must be allowlisted and validated (for example strict color-token keys + safe color syntax); arbitrary CSS/value injection is forbidden.
 - Branding overrides (logo/favicon/icon/hero) must resolve through safe asset keys; raw uncontrolled URLs are forbidden.
 - Tenant selection/override metadata must be treated as data, validated, and never allowed to create arbitrary shell architecture.
+
+## Planning / Scheduling UI Handoff
+
+The UI Engine presents Planning/Scheduling state but does not calculate it.
+
+Server/API projections may expose bounded generic fields such as:
+
+```text
+Service Object identity
+route steps / process identity
+route step state
+planned_start_at
+planned_finish_at
+actual completion/start facts
+maturity / wait reason
+schedule revision / source
+freeze/protection state
+resource candidate identity
+required workload
+candidate duration
+load min / average / max
+load status / ratio
+capacity required / available
+exception/provenance summary
+```
+
+The UI may use metadata to choose labels, columns, ordering, grouping and layout. It must not implement:
+
+```text
+MRP netting
+CRP load calculation
+resource eligibility
+batch-duration calculation
+schedule ranking
+critical-path calculation
+freeze/replan decisions
+```
+
+Those remain server/Process/Macro responsibilities.
+
+### First UI slice
+
+The first Planning/Scheduling UI should prove the engine before adding advanced visual primitives.
+
+Preferred first surface composition:
+
+```text
+SurfaceRoot
+  -> PanelHeader
+  -> SplitLayout
+       -> ContractTablePanel
+            selection target = schedule_step
+            route/process rows
+            planned dates
+            state/maturity
+            schedule revision
+       -> SelectionDetailPanel
+            reads schedule_step
+            selected Service Object/process identity
+            planned/actual timing
+            maturity/wait state
+            schedule provenance
+```
+
+This deliberately uses generic primitives. Workload/capacity/load/resource details may be added once those facts are exposed by bounded server projections; the UI must not fabricate them from local calculations.
+
+A timeline/Gantt/capacity visual may be admitted later only as a domain-neutral primitive after the generic API projection is stable.
+
+### Generic visualization admission rule
+
+A new visual primitive is admitted only if the same component can render metadata/data from materially different domains without source edits. Examples of potentially admissible future primitives:
+
+```text
+Timeline / interval lane
+Capacity meter
+Metric card
+Exception list
+Dependency graph
+```
+
+Names such as `ProductionSchedule`, `HospitalScheduler` or `FleetDispatchBoard` are not primitive identities.
+
+## UI Engine Readiness Gate
+
+Before declaring the UI Engine ready for the first user-facing surface:
+
+1. renderer recursion is bounded and uses only the allowlisted registry;
+2. surface payload is sanitized and bounded before rendering;
+3. contract endpoints are normalized/allowlisted and unresolved path tokens fail closed;
+4. tenant/realm surface selection is server-derived and scoped;
+5. shell/theme profile resolution consumes published governed metadata;
+6. generic primitives cover table/list/detail/edit composition without domain composites;
+7. generic selection targets coordinate primitives without hardcoded business object state;
+8. API projections carry business/process semantics so frontend code does not recreate them;
+9. Planning/Scheduling fields are presentation-only in the UI Engine;
+10. write actions continue through governed API/Process/Effect paths rather than direct frontend state authority;
+11. first surface can be defined mostly through `ui_surface` metadata.
 
 ## Quality Check (Mandatory in UI Waves)
 

@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Briefcase,
+  CalendarClock,
   ClipboardList,
   Copy,
   Database,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import StateNotice from "../primitives/StateNotice.jsx";
 import { resolveAsset } from "../../engine/assetRegistry.js";
+import { apiFetch } from "../../services/apiClient.js";
 
 // Governance compatibility anchors (kept as text-only markers for validation scripts):
 // Reload Surfaces
@@ -40,6 +42,7 @@ const NAV_ICON_LIBRARY = Object.freeze({
   FileClock,
   Database,
   BarChart3,
+  CalendarClock,
   Settings,
 });
 
@@ -57,6 +60,7 @@ const DEFAULT_NAV_ICON_BY_CODE = Object.freeze({
   owner_integrations: "Plug",
   owner_reports: "BarChart3",
   owner_settings: "Settings",
+  planning_schedule: "CalendarClock",
   ecom_review_console: "ClipboardList",
 });
 
@@ -147,6 +151,7 @@ function OwnerAdminShell({
   const [navCollapsed, setNavCollapsed] = useState(theme.layoutVariant === "platform_compact");
   const [localNotice, setLocalNotice] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [account, setAccount] = useState(null);
   const profileMenuRef = useRef(null);
   const profileTriggerRef = useRef(null);
 
@@ -182,10 +187,30 @@ function OwnerAdminShell({
   const headerTabs = useMemo(() => sidebarEntries.slice(0, 4), [sidebarEntries]);
 
   const accountLabel = useMemo(() => {
-    return auth?.session?.identity_id || auth?.session?.tenant_id || theme.brandLabel;
-  }, [auth?.session?.identity_id, auth?.session?.tenant_id, theme.brandLabel]);
+    return account?.login || account?.email || theme.brandLabel;
+  }, [account?.email, account?.login, theme.brandLabel]);
 
   const accountInitials = useMemo(() => initialsFromName(accountLabel), [accountLabel]);
+
+  useEffect(() => {
+    let active = true;
+    if (!auth?.session?.identity_id) {
+      setAccount(null);
+      return undefined;
+    }
+
+    apiFetch("/api/eip/owner-admin/account")
+      .then((payload) => {
+        if (active) setAccount(payload?.account || null);
+      })
+      .catch(() => {
+        if (active) setAccount(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [auth?.session?.identity_id, auth?.session?.tenant_id]);
 
   useEffect(() => {
     setNavCollapsed(theme.layoutVariant === "platform_compact");
@@ -234,6 +259,12 @@ function OwnerAdminShell({
           : Promise.resolve(),
         typeof onRefreshSession === "function" ? onRefreshSession() : Promise.resolve(),
       ]);
+      try {
+        const payload = await apiFetch("/api/eip/owner-admin/account");
+        setAccount(payload?.account || null);
+      } catch {
+        // Session refresh remains authoritative; account display may safely fall back.
+      }
       setLocalNotice("Workspace refreshed.");
     } finally {
       setRefreshing(false);
@@ -256,6 +287,12 @@ function OwnerAdminShell({
       setSurfaceCode(entry.surfaceCode);
     }
   }
+
+  const organisationLabel = account?.tenant_name
+    ? account?.tenant_code
+      ? `${account.tenant_name} (${account.tenant_code})`
+      : account.tenant_name
+    : auth?.session?.tenant_id || "-";
 
   return (
     <div className={`owner-shell owner-shell--${theme.layoutVariant}`}>
@@ -323,16 +360,17 @@ function OwnerAdminShell({
                 <span className="owner-profile-fallback">{accountInitials}</span>
               )}
               <span className="owner-profile-meta">
-                <strong>Account</strong>
-                <small>{auth?.session?.identity_id || "Signed in user"}</small>
+                <strong>{account?.login || "Account"}</strong>
+                <small>{account?.email || "Signed in user"}</small>
               </span>
             </button>
 
             {profileMenuOpen ? (
               <div ref={profileMenuRef} className="owner-profile-menu" role="menu">
                 <div className="owner-profile-card">
-                  <strong>{auth?.session?.identity_id || "Unknown user"}</strong>
-                  <small>Organisation: {auth?.session?.tenant_id || "-"}</small>
+                  <strong>{account?.login || auth?.session?.identity_id || "Unknown user"}</strong>
+                  {account?.email ? <small>{account.email}</small> : null}
+                  <small>Organisation: {organisationLabel}</small>
                   <small>Permissions: {(auth?.session?.permissions || []).length}</small>
                 </div>
                 <button type="button" onClick={refreshWorkspace}>

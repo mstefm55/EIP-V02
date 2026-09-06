@@ -7,17 +7,22 @@ import path from "node:path";
 
 import dbPlugin from "./plugins/db.js";
 import authShellPlugin from "./plugins/authShell.js";
+import authTransportHardeningPlugin from "./plugins/authTransportHardening.js";
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
+import authSessionTransportRoutes from "./routes/auth_session_transport.js";
+import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
+import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
-import ownerAdminModuleRoutes from "./routes/owner_admin_modules.js";
+import ownerAdminConsoleRoutes from "./routes/owner_admin_console.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 
 const DEFAULT_PORT = 4010;
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:5174"];
+const DEFAULT_BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
 function parseBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -114,6 +119,7 @@ function buildRuntimeConfig(overrides = {}) {
     AUTH_COOKIE_SAMESITE: process.env.AUTH_COOKIE_SAMESITE || "lax",
     AUTH_COOKIE_PATH: process.env.AUTH_COOKIE_PATH || "/",
     AUTH_COOKIE_DOMAIN: process.env.AUTH_COOKIE_DOMAIN || null,
+    AUTH_COOKIE_PARTITIONED: parseBoolean(process.env.AUTH_COOKIE_PARTITIONED, false),
     AUTH_SESSION_TTL_MIN: parseInteger(process.env.AUTH_SESSION_TTL_MIN, 720),
     AUTH_SESSION_IDLE_TTL_MIN: parseInteger(process.env.AUTH_SESSION_IDLE_TTL_MIN, 120),
     AUTH_SESSION_TOUCH_INTERVAL_SEC: parseInteger(process.env.AUTH_SESSION_TOUCH_INTERVAL_SEC, 300),
@@ -139,6 +145,12 @@ function buildRuntimeConfig(overrides = {}) {
     AUTH_LOGIN_FAILURE_THRESHOLD: parseInteger(process.env.AUTH_LOGIN_FAILURE_THRESHOLD, 8),
     AUTH_LOGIN_LOCK_MIN: parseInteger(process.env.AUTH_LOGIN_LOCK_MIN, 15),
     LOG_DEV_OTP: parseBoolean(process.env.LOG_DEV_OTP, false),
+    EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || null,
+    EMAIL_API_KEY: process.env.EMAIL_API_KEY || null,
+    EMAIL_API_BASE_URL: process.env.EMAIL_API_BASE_URL || DEFAULT_BREVO_API_URL,
+    EMAIL_FROM: process.env.EMAIL_FROM || null,
+    EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || null,
+    BREVO_API_KEY: process.env.BREVO_API_KEY || null,
     SMTP_HOST: process.env.SMTP_HOST || null,
     SMTP_PORT: parseInteger(process.env.SMTP_PORT, 587),
     SMTP_SECURE: parseBoolean(process.env.SMTP_SECURE, false),
@@ -200,13 +212,17 @@ async function buildServer(options = {}) {
 
   await app.register(dbPlugin);
   await app.register(authShellPlugin);
+  await app.register(authTransportHardeningPlugin);
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
+  await app.register(authOrganisationRoutes, { prefix: "/api/eip" });
   await app.register(authRoutes, { prefix: "/api/eip" });
+  await app.register(authSessionTransportRoutes, { prefix: "/api/eip" });
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
-  await app.register(ownerAdminModuleRoutes, { prefix: "/api/eip" });
+  await app.register(ownerAdminConsoleRoutes, { prefix: "/api/eip" });
+  await app.register(planningScheduleRoutes, { prefix: "/api/eip" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip/core" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip" });
 

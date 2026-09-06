@@ -47,11 +47,18 @@ function resolveContract(contract, ctx, options = {}) {
   if (!contract || typeof contract !== "object") return null;
   if (!contract.endpoint) return null;
 
+  const selectionTargets =
+    ctx?.selection?.targets && typeof ctx.selection.targets === "object"
+      ? ctx.selection.targets
+      : {};
+  const defaultSelection = ctx?.selection?.definition || selectionTargets.definition || {};
+
   const scopes = {
     surface: ctx?.surfaceProps || {},
     surface_meta: ctx?.surfaceMeta || {},
     available_surfaces: ctx?.availableSurfaces || [],
-    selection: ctx?.selection?.definition || {},
+    selection: defaultSelection,
+    selections: selectionTargets,
     auth: ctx?.auth?.session || {},
   };
 
