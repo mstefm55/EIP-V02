@@ -7,10 +7,9 @@ function compactSql(sql) {
   return String(sql).replace(/\s+/g, " ").trim();
 }
 
-function createClient({ patchMode = false } = {}) {
+function createClient({ scheduleMode = false } = {}) {
   const state = {
     projectionQueries: 0,
-    serviceObjectPatch: null,
     serviceObjectPathPatch: null,
     processInstanceUpdated: false,
     queries: []
@@ -65,10 +64,10 @@ function createClient({ patchMode = false } = {}) {
                         }
                       }
                     ],
-                    effects: patchMode
+                    effects: scheduleMode
                       ? [
                           {
-                            type: "SO_UPDATE",
+                            type: "SERVICE_OBJECT_PATCH",
                             patches: [
                               {
                                 op: "SET",
@@ -91,8 +90,14 @@ function createClient({ patchMode = false } = {}) {
                         ]
                       : [
                           {
-                            type: "SO_UPDATE",
-                            attrs: { planned_quantity: "$calc.planned_quantity" }
+                            type: "SERVICE_OBJECT_PATCH",
+                            patches: [
+                              {
+                                op: "SET",
+                                path: ["planned_quantity"],
+                                value: "$calc.planned_quantity"
+                              }
+                            ]
                           }
                         ]
                   }
@@ -136,13 +141,17 @@ function createClient({ patchMode = false } = {}) {
       if (compact.includes("FROM eip_core.dropdown_list dl") && compact.includes("JOIN eip_core.dropdown_value dv")) {
         return {
           rowCount: 1,
-          rows: [{ code: "SO_UPDATE", is_active: true, attrs: {} }]
+          rows: [
+            {
+              code: "SERVICE_OBJECT_PATCH",
+              is_active: true,
+              attrs: {
+                canonical_effect_code: "SERVICE_OBJECT_PATCH",
+                allowed_fields: ["service_object_id", "patches"]
+              }
+            }
+          ]
         };
-      }
-
-      if (compact.startsWith("UPDATE eip_core.service_object SET title")) {
-        state.serviceObjectPatch = JSON.parse(params[3]);
-        return { rowCount: 1, rows: [] };
       }
 
       if (
@@ -166,7 +175,7 @@ function createClient({ patchMode = false } = {}) {
   };
 }
 
-test("Process Engine executes bounded Macro reasoning and Effects consume $calc without persisting raw calc", async () => {
+test("Process Engine executes bounded Macro reasoning and SERVICE_OBJECT_PATCH consumes $calc", async () => {
   const client = createClient();
 
   const result = await advanceInstance(client, {
@@ -180,7 +189,10 @@ test("Process Engine executes bounded Macro reasoning and Effects consume $calc 
 
   assert.equal(result.ok, true);
   assert.equal(client.state.projectionQueries, 1);
-  assert.deepEqual(client.state.serviceObjectPatch, { planned_quantity: 200 });
+  assert.deepEqual(client.state.serviceObjectPathPatch, {
+    path: ["planned_quantity"],
+    value: 200
+  });
   assert.equal(client.state.processInstanceUpdated, true);
 
   assert.equal(result.entry.calculation.parent_attr_paths[0], "quantity");
@@ -190,11 +202,12 @@ test("Process Engine executes bounded Macro reasoning and Effects consume $calc 
   assert.equal(Array.isArray(result.entry.calculation.audit), true);
   assert.equal(Object.prototype.hasOwnProperty.call(result.entry.calculation, "calc"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result.entry, "calc"), false);
-  assert.equal(result.entry.effects_applied[0].type, "SO_UPDATE");
+  assert.equal(result.entry.effects_applied[0].type, "SERVICE_OBJECT_PATCH");
+  assert.equal(result.entry.effects_applied[0].patch_count, 1);
 });
 
-test("SO_UPDATE path patches can persist a nested schedule projection from governed $calc", async () => {
-  const client = createClient({ patchMode: true });
+test("SERVICE_OBJECT_PATCH persists a nested schedule projection from governed $calc", async () => {
+  const client = createClient({ scheduleMode: true });
 
   const result = await advanceInstance(client, {
     tenantId: "tenant-1",
@@ -220,7 +233,7 @@ test("SO_UPDATE path patches can persist a nested schedule projection from gover
     source_code: "CURRENT_SCHEDULE",
     revision: 200
   });
-  assert.equal(result.entry.effects_applied[0].type, "SO_UPDATE");
+  assert.equal(result.entry.effects_applied[0].type, "SERVICE_OBJECT_PATCH");
   assert.equal(result.entry.effects_applied[0].patch_count, 1);
   assert.equal(client.state.processInstanceUpdated, true);
 });
