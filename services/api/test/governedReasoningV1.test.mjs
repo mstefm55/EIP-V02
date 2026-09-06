@@ -21,11 +21,51 @@ function runtime() {
   };
 }
 
-test("scalar operators remain domain-neutral and deterministic", () => {
+test("scalar arithmetic transformation operators remain domain-neutral and deterministic", () => {
   assert.equal(runGovernedReasoningOperator("ADD", [10, 20, 5]), 35);
+  assert.equal(runGovernedReasoningOperator("SUBTRACT", [20, 7]), 13);
+  assert.equal(runGovernedReasoningOperator("MULTIPLY", [4, 5, 2]), 40);
   assert.equal(runGovernedReasoningOperator("DIVIDE", [10000, 500]), 20);
+  assert.equal(runGovernedReasoningOperator("MOD", [17, 5]), 2);
+  assert.equal(runGovernedReasoningOperator("MIN", [9, 3, 7]), 3);
+  assert.equal(runGovernedReasoningOperator("MAX", [9, 3, 7]), 9);
+  assert.equal(runGovernedReasoningOperator("ABS", [-12]), 12);
+  assert.equal(runGovernedReasoningOperator("ROUND", [2.6]), 3);
+  assert.equal(runGovernedReasoningOperator("FLOOR", [2.9]), 2);
+  assert.equal(runGovernedReasoningOperator("CEIL", [2.1]), 3);
+});
+
+test("comparison, boolean and collection operators remain primitive", () => {
+  assert.equal(runGovernedReasoningOperator("EQ", ["A", "A"]), true);
+  assert.equal(runGovernedReasoningOperator("NE", ["A", "B"]), true);
+  assert.equal(runGovernedReasoningOperator("GT", [9, 8]), true);
   assert.equal(runGovernedReasoningOperator("GTE", [8, 8]), true);
+  assert.equal(runGovernedReasoningOperator("LT", [7, 8]), true);
+  assert.equal(runGovernedReasoningOperator("LTE", [8, 8]), true);
+  assert.equal(runGovernedReasoningOperator("AND", [true, true, 1]), true);
+  assert.equal(runGovernedReasoningOperator("OR", [false, 0, true]), true);
+  assert.equal(runGovernedReasoningOperator("NOT", [false]), true);
+  assert.equal(runGovernedReasoningOperator("COALESCE", [null, undefined, 4]), 4);
   assert.equal(runGovernedReasoningOperator("COUNT", [[1, 2, 3]]), 3);
+  assert.equal(runGovernedReasoningOperator("SUM", [[1, 2, 3]]), 6);
+  assert.equal(runGovernedReasoningOperator("FIRST", [[7, 8, 9]]), 7);
+  assert.equal(runGovernedReasoningOperator("LAST", [[7, 8, 9]]), 9);
+  assert.equal(runGovernedReasoningOperator("GET", [[7, 8, 9], 1]), 8);
+});
+
+test("invalid numeric transformations fail closed", () => {
+  assert.throws(
+    () => runGovernedReasoningOperator("DIVIDE", [1, 0]),
+    /REASONING_DIVIDE_BY_ZERO/
+  );
+  assert.throws(
+    () => runGovernedReasoningOperator("MOD", [1, 0]),
+    /REASONING_MOD_BY_ZERO/
+  );
+  assert.throws(
+    () => runGovernedReasoningOperator("MULTIPLY", [2, "not-a-number"]),
+    /REASONING_NUMBER_REQUIRED/
+  );
 });
 
 test("lazy IF does not evaluate the unused branch", () => {
