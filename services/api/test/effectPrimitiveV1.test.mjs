@@ -33,6 +33,12 @@ const REJECTED_BUSINESS_EFFECTS = [
   "VARIANT_INVENTORY_VALIDATE"
 ];
 
+function registryBlock(source) {
+  const match = source.match(/const EFFECT_HANDLER_REGISTRY = \{([\s\S]*?)\n\};/);
+  assert.ok(match, "Effect handler registry must exist");
+  return match[1];
+}
+
 test("Effect Library Primitive V1 canon explicitly admits the locked generic vocabulary", async () => {
   const source = await readFile(canonPath, "utf8");
   for (const code of CANONICAL_OBJECT_EFFECTS) {
@@ -43,18 +49,14 @@ test("Effect Library Primitive V1 canon explicitly admits the locked generic voc
 
 test("v2_0036 admits canonical primitive identities and retires inventory business effects", async () => {
   const source = await readFile(migrationPath, "utf8");
-
-  for (const code of CANONICAL_OBJECT_EFFECTS) {
-    assert.match(source, new RegExp(`'${code}'`));
-  }
-  for (const code of REJECTED_BUSINESS_EFFECTS) {
-    assert.match(source, new RegExp(`'${code}'`));
-  }
-
+  for (const code of CANONICAL_OBJECT_EFFECTS) assert.match(source, new RegExp(`'${code}'`));
+  for (const code of REJECTED_BUSINESS_EFFECTS) assert.match(source, new RegExp(`'${code}'`));
   assert.match(source, /forbidden_as_primitive/);
   assert.match(source, /replacement_layer', 'process_macro_reasoning/);
   assert.match(source, /SET is_active = false/);
   assert.match(source, /PRIMITIVE_EFFECT_TAXONOMY_CONFLICT/);
+  assert.match(source, /'canonical_effect_code', canonical\.code/);
+  assert.match(source, /'allowed_fields', canonical\.allowed_fields/);
 });
 
 test("primitive taxonomy migration is forward metadata repair with no new tables", async () => {
@@ -66,11 +68,37 @@ test("primitive taxonomy migration is forward metadata repair with no new tables
 });
 
 test("SERVICE_OBJECT_PATCH is bounded to Service Object patch semantics", async () => {
-  const source = await readFile(migrationPath, "utf8");
-  assert.match(source, /'SERVICE_OBJECT_PATCH'/);
-  assert.match(source, /'operations', jsonb_build_array\('SET', 'REMOVE'\)/);
-  assert.match(source, /'mutation_scope', jsonb_build_array\('attrs'\)/);
-  assert.match(source, /'reasoning_inside_handler', false/);
+  const migration = await readFile(migrationPath, "utf8");
+  const engine = await readFile(enginePath, "utf8");
+  assert.match(migration, /'SERVICE_OBJECT_PATCH'/);
+  assert.match(migration, /'operations', jsonb_build_array\('SET', 'REMOVE'\)/);
+  assert.match(migration, /'mutation_scope', jsonb_build_array\('attrs'\)/);
+  assert.match(migration, /'reasoning_inside_handler', false/);
+  assert.match(engine, /SERVICE_OBJECT_PATCH_REQUIRES_BOUNDED_PATCHES/);
+  assert.match(engine, /patchServiceObjectAttrs/);
+});
+
+test("runtime registry admits canonical primitives and excludes business inventory effects", async () => {
+  const source = await readFile(enginePath, "utf8");
+  const registry = registryBlock(source);
+  for (const code of CANONICAL_OBJECT_EFFECTS) {
+    assert.match(registry, new RegExp(`\\b${code}\\b`));
+  }
+  for (const code of REJECTED_BUSINESS_EFFECTS) {
+    assert.doesNotMatch(registry, new RegExp(`\\b${code}\\b`));
+  }
+  assert.doesNotMatch(registry, /\bJSON_MERGE\b/);
+});
+
+test("canonical runtime contracts fail closed on unsupported parameters", async () => {
+  const source = await readFile(enginePath, "utf8");
+  assert.match(source, /validateGovernedEffectRuntimeContract/);
+  assert.match(source, /EFFECT_FIELD_UNSUPPORTED/);
+  assert.match(source, /SERVICE_OBJECT_CREATE_ITEMS_UNSUPPORTED/);
+  assert.match(source, /SERVICE_OBJECT_CREATE_LINKS_UNSUPPORTED/);
+  assert.match(source, /TASK_PATCH_STATE_UNSUPPORTED/);
+  assert.match(source, /TASK_STATE_TRANSITION_FIELD_UNSUPPORTED/);
+  assert.match(source, /INFO_RECORD_CREATE_LINKS_UNSUPPORTED/);
 });
 
 test("legacy names are explicitly compatibility-only rather than a second public catalogue", async () => {
