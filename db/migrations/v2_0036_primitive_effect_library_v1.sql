@@ -58,6 +58,27 @@ BEGIN
   END IF;
 END $$;
 
+-- TASK_CREATE remains a primitive, but the canonical contract accepts a resolved due_at.
+-- Fail before changing catalogue authority if an active definition still relies on the
+-- historical wall-clock convenience field due_in_days.
+DO $$
+DECLARE
+  v_conflict_count bigint;
+BEGIN
+  SELECT count(*)
+  INTO v_conflict_count
+  FROM eip_core.process_def pd
+  WHERE pd.is_active = true
+    AND pd.graph::text ~ '"type"\s*:\s*"TASK_CREATE"'
+    AND pd.graph::text ~ '"due_in_days"';
+
+  IF v_conflict_count > 0 THEN
+    RAISE EXCEPTION
+      'PRIMITIVE_EFFECT_TASK_DUE_CONFLICT: % active process definition(s) still use TASK_CREATE.due_in_days; resolve calendar time before TASK_CREATE',
+      v_conflict_count;
+  END IF;
+END $$;
+
 -- Correct catalogue applicability: Effects are Macro-owned execution bundles, never
 -- transition-local hidden Effects.
 UPDATE eip_core.dropdown_list
@@ -75,9 +96,8 @@ WHERE code = 'PROCESS_EFFECT_TYPE'
   AND tenant_id IS NULL
   AND is_active = true;
 
--- Canonical public Object_Effect identities. The current finite runtime still uses
--- historical executable codes internally; runtime_compatibility_code is explicit and
--- temporary. Business metadata must use the public canonical code from now on.
+-- Canonical public Object_Effect identities bind directly to canonical finite runtime
+-- handlers. allowed_fields is the runtime parameter allowlist; unknown fields fail closed.
 WITH effect_list AS (
   SELECT id
   FROM eip_core.dropdown_list
@@ -86,20 +106,83 @@ WITH effect_list AS (
     AND is_active = true
   ORDER BY version DESC
   LIMIT 1
-), canonical(code, label, sort_order, runtime_code, runtime_handler, object_family, required_fields, allowed_targets) AS (
+), canonical(
+  code, label, sort_order, runtime_handler, object_family,
+  required_fields, allowed_targets, allowed_fields
+) AS (
   VALUES
-    ('SERVICE_OBJECT_CREATE',           'Service Object Create',           10, 'CHILD_SERVICE_OBJECT_CREATE', 'childServiceObjectCreate', 'service_object', '[]'::jsonb,                       '[]'::jsonb),
-    ('SERVICE_OBJECT_PATCH',            'Service Object Patch',            20, 'SO_UPDATE',                   'serviceObjectUpdate',      'service_object', '["patches"]'::jsonb,              '["service_object"]'::jsonb),
-    ('SERVICE_OBJECT_STATE_TRANSITION', 'Service Object State Transition', 30, 'STATUS_SET',                  'statusSet',                'service_object', '["to"]'::jsonb,                   '["service_object"]'::jsonb),
-    ('TASK_CREATE',                     'Task Create',                     40, 'TASK_CREATE',                 'taskCreate',               'task',           '["task_type"]'::jsonb,            '["task"]'::jsonb),
-    ('TASK_PATCH',                      'Task Patch',                      50, 'TASK_UPDATE',                 'taskUpdate',               'task',           '["task_id"]'::jsonb,              '["task"]'::jsonb),
-    ('TASK_STATE_TRANSITION',           'Task State Transition',           60, 'TASK_UPDATE',                 'taskUpdate',               'task',           '["task_id","to"]'::jsonb,       '["task"]'::jsonb),
-    ('LINK_CREATE',                     'Link Create',                     70, 'LINK_CREATE',                 'linkCreate',               'object_link',    '["src_kind","src_id","dst_kind","dst_id","relation_type"]'::jsonb, '["object_link"]'::jsonb),
-    ('LINK_REMOVE',                     'Link Remove',                     80, 'LINK_REMOVE',                 'linkRemove',               'object_link',    '["src_kind","src_id","dst_kind","dst_id","relation_type"]'::jsonb, '["object_link"]'::jsonb),
-    ('INFO_RECORD_CREATE',              'Info Record Create',              90, 'INFO_RECORD_WRITE',           'infoRecordWrite',          'info_record',    '["record_type"]'::jsonb,          '["info_record"]'::jsonb),
-    ('PROCESS_START',                   'Process Start',                  100, 'INSTANCE_START',              'instanceStart',            'process_instance','[]'::jsonb,                      '["process_instance"]'::jsonb),
-    ('ACCESS_GRANT_CREATE',             'Access Grant Create',            110, 'ACCESS_GRANT_CREATE',         'accessGrantCreate',        'access_grant',   '["grant_type"]'::jsonb,           '["access_grant"]'::jsonb),
-    ('ACCESS_GRANT_PATCH',              'Access Grant Patch',             120, 'ACCESS_GRANT_UPDATE',         'accessGrantUpdate',        'access_grant',   '[]'::jsonb,                       '["access_grant"]'::jsonb)
+    (
+      'SERVICE_OBJECT_CREATE', 'Service Object Create', 10,
+      'serviceObjectCreate', 'service_object',
+      '[]'::jsonb, '["service_object"]'::jsonb,
+      '["status","list_code","owner","owner_agent_id","attrs","title","as","key"]'::jsonb
+    ),
+    (
+      'SERVICE_OBJECT_PATCH', 'Service Object Patch', 20,
+      'serviceObjectPatch', 'service_object',
+      '["patches"]'::jsonb, '["service_object"]'::jsonb,
+      '["service_object_id","patches"]'::jsonb
+    ),
+    (
+      'SERVICE_OBJECT_STATE_TRANSITION', 'Service Object State Transition', 30,
+      'serviceObjectStateTransition', 'service_object',
+      '["to"]'::jsonb, '["service_object"]'::jsonb,
+      '["service_object_id","to","list_code","reason_code","note"]'::jsonb
+    ),
+    (
+      'TASK_CREATE', 'Task Create', 40,
+      'taskCreate', 'task',
+      '["task_type"]'::jsonb, '["task"]'::jsonb,
+      '["task_type","assign","assigned_agent_id","due_at","title","description","payload","attrs"]'::jsonb
+    ),
+    (
+      'TASK_PATCH', 'Task Patch', 50,
+      'taskPatch', 'task',
+      '["task_id"]'::jsonb, '["task"]'::jsonb,
+      '["task_id","title","description","assigned_agent_id","due_at","payload","attrs"]'::jsonb
+    ),
+    (
+      'TASK_STATE_TRANSITION', 'Task State Transition', 60,
+      'taskStateTransition', 'task',
+      '["task_id","to"]'::jsonb, '["task"]'::jsonb,
+      '["task_id","to","reason_code","note"]'::jsonb
+    ),
+    (
+      'LINK_CREATE', 'Link Create', 70,
+      'linkCreate', 'object_link',
+      '["src_kind","src_id","dst_kind","dst_id","relation_type"]'::jsonb, '["object_link"]'::jsonb,
+      '["src_kind","src_id","dst_kind","dst_id","relation_type","attrs"]'::jsonb
+    ),
+    (
+      'LINK_REMOVE', 'Link Remove', 80,
+      'linkRemove', 'object_link',
+      '["src_kind","src_id","dst_kind","dst_id","relation_type"]'::jsonb, '["object_link"]'::jsonb,
+      '["src_kind","src_id","dst_kind","dst_id","relation_type"]'::jsonb
+    ),
+    (
+      'INFO_RECORD_CREATE', 'Info Record Create', 90,
+      'infoRecordCreate', 'info_record',
+      '["record_type"]'::jsonb, '["info_record"]'::jsonb,
+      '["record_type","title","description","payload","attrs"]'::jsonb
+    ),
+    (
+      'PROCESS_START', 'Process Start', 100,
+      'processStart', 'process_instance',
+      '[]'::jsonb, '["process_instance"]'::jsonb,
+      '["service_object_id","process_def_id","module","code","version","idempotency_key","idempotency_key_prefix"]'::jsonb
+    ),
+    (
+      'ACCESS_GRANT_CREATE', 'Access Grant Create', 110,
+      'accessGrantCreate', 'access_grant',
+      '["grant_type"]'::jsonb, '["access_grant"]'::jsonb,
+      '["grant_type","token_raw","token_hash","token_hint","service_object_id","agent_id","content_object_id","content_version_id","state","expires_at","max_uses","attrs","allow_reuse","allow_missing"]'::jsonb
+    ),
+    (
+      'ACCESS_GRANT_PATCH', 'Access Grant Patch', 120,
+      'accessGrantPatch', 'access_grant',
+      '[]'::jsonb, '["access_grant"]'::jsonb,
+      '["grant_id","token_hash","state","require_states","increment_uses","set_last_redeemed"]'::jsonb
+    )
 )
 INSERT INTO eip_core.dropdown_value
   (list_id, code, label, sort_order, is_active, attrs)
@@ -111,8 +194,7 @@ SELECT
   true,
   jsonb_build_object(
     'canonical_public_effect_code', canonical.code,
-    'canonical_effect_code', canonical.runtime_code,
-    'runtime_compatibility_code', canonical.runtime_code,
+    'canonical_effect_code', canonical.code,
     'runtime_handler', canonical.runtime_handler,
     'object_family', canonical.object_family,
     'semantic_class', CASE
@@ -121,6 +203,7 @@ SELECT
     END,
     'required_fields', canonical.required_fields,
     'allowed_targets', canonical.allowed_targets,
+    'allowed_fields', canonical.allowed_fields,
     'primitive_v1', true,
     'deprecated', false
   ) || CASE
@@ -133,7 +216,7 @@ SELECT
     )
     WHEN canonical.code = 'TASK_CREATE' THEN jsonb_build_object(
       'resolved_temporal_fields', jsonb_build_array('due_at'),
-      'deprecated_convenience_fields', jsonb_build_array('due_in_days')
+      'calendar_resolution_required_upstream', true
     )
     ELSE '{}'::jsonb
   END
@@ -146,9 +229,10 @@ SET label = EXCLUDED.label,
     attrs = EXCLUDED.attrs,
     updated_at = now();
 
--- Historical executable identities remain temporarily active only so the current finite
--- code dispatcher can execute the canonical public primitives above. They are hidden,
--- deprecated and explicitly denied authority as public primitive identities.
+-- Historical generic executable identities remain temporarily active for definitions
+-- created before Primitive V1. They retain their own historical executable code because
+-- several old contracts were overloaded (STATUS_SET and TASK_UPDATE in particular).
+-- They are hidden/deprecated and have no public primitive authority.
 WITH effect_list AS (
   SELECT id
   FROM eip_core.dropdown_list
@@ -160,9 +244,9 @@ WITH effect_list AS (
 ), aliases(code, replacement) AS (
   VALUES
     ('CHILD_SERVICE_OBJECT_CREATE', 'SERVICE_OBJECT_CREATE'),
-    ('STATUS_SET',                  'SERVICE_OBJECT_STATE_TRANSITION'),
+    ('STATUS_SET',                  'SERVICE_OBJECT_STATE_TRANSITION/TASK_STATE_TRANSITION'),
     ('SO_UPDATE',                   'SERVICE_OBJECT_PATCH'),
-    ('TASK_UPDATE',                 'TASK_PATCH'),
+    ('TASK_UPDATE',                 'TASK_PATCH/TASK_STATE_TRANSITION'),
     ('INFO_RECORD_WRITE',           'INFO_RECORD_CREATE'),
     ('INSTANCE_START',              'PROCESS_START'),
     ('ACCESS_GRANT_UPDATE',         'ACCESS_GRANT_PATCH'),
@@ -176,9 +260,9 @@ SET attrs = COALESCE(dv.attrs, '{}'::jsonb) || jsonb_build_object(
       'deprecated', true,
       'ui_hidden', true,
       'compatibility_alias_only', true,
-      'canonical_public_effect_code', aliases.replacement,
       'replacement_effect_code', aliases.replacement,
-      'public_primitive_authority', false
+      'public_primitive_authority', false,
+      'primitive_v1', false
     ),
     updated_at = now()
 FROM effect_list, aliases
