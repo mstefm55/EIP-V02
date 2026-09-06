@@ -5,7 +5,6 @@ on:
     branches:
       - repair/primitive-effects-v1
     paths:
-      - scripts/repair_primitive_effect_runtime.mjs
       - scripts/remove_nonprimitive_effect_handlers.mjs
       - .github/workflows/apply-primitive-effect-runtime-repair.yml
 
@@ -27,9 +26,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Apply assertion-based canonical runtime repair
-        run: node scripts/repair_primitive_effect_runtime.mjs
 
       - name: Remove nonprimitive/dead Effect handlers
         run: node scripts/remove_nonprimitive_effect_handlers.mjs
