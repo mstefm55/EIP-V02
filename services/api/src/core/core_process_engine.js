@@ -15,21 +15,6 @@ const SERVICE_OBJECT_TYPE_LIST_CODE = "SERVICE_OBJECT_TYPE";
 const DOCUMENT_CATEGORY_LIST_CODE = "DOCUMENT_CATEGORY";
 const DOCUMENT_HEADER_KEY_LIST_CODE = "DOCUMENT_HEADER_KEY";
 
-async function executeGatewayOutboundRequest(client, ctx, requestOptions) {
-  try {
-    const gateway = await import("../services/gateway/outbound.js");
-    if (typeof gateway.executeGatewayOutboundRequest !== "function") {
-      throw new Error("executeGatewayOutboundRequest export is missing");
-    }
-    return await gateway.executeGatewayOutboundRequest(client, ctx, requestOptions);
-  } catch (error) {
-    if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      throw new Error("HTTP_REQUEST_EFFECT_UNAVAILABLE");
-    }
-    throw error;
-  }
-}
-
 function normalizeText(value) {
   return String(value || "").trim();
 }
@@ -69,7 +54,6 @@ const EFFECT_HANDLER_REGISTRY = {
   PROCESS_START: "processStart",
   ACCESS_GRANT_CREATE: "accessGrantCreate",
   ACCESS_GRANT_PATCH: "accessGrantPatch",
-  HTTP_REQUEST: "httpRequest",
 
   // Temporary generic compatibility executable identities. These are not public
   // primitive authority; governed metadata marks them hidden/deprecated.
@@ -748,16 +732,6 @@ function resolveDynamicValue(value, ctx, payload) {
     return resolved;
   }
   return value;
-}
-
-function normalizeHeaders(input) {
-  if (!input || typeof input !== "object") return {};
-  const headers = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (value === undefined || value === null) continue;
-    headers[String(key)] = String(value);
-  }
-  return headers;
 }
 
 async function applyEffects(client, ctx, effects, payload) {
