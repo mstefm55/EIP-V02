@@ -163,8 +163,7 @@ export async function patchObjectLinkAttrs(client, options = {}) {
   const result = await client.query(
     `
     UPDATE eip_core.object_link
-    SET attrs = ${built.expression},
-        updated_at = now()
+    SET attrs = ${built.expression}
     WHERE tenant_id=$1
       AND src_kind=$2
       AND src_id=$3
