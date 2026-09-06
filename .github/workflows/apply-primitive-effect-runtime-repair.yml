@@ -5,8 +5,7 @@ on:
     branches:
       - repair/primitive-effects-v1
     paths:
-      - scripts/remove_nonprimitive_effect_handlers.mjs
-      - services/api/src/core/objectLinkJsonPatch.js
+      - scripts/finalize_effect_runtime_v1.mjs
       - .github/workflows/apply-primitive-effect-runtime-repair.yml
 
 permissions:
@@ -29,7 +28,7 @@ jobs:
           node-version: '20'
 
       - name: Apply final primitive Effect runtime repair
-        run: node scripts/remove_nonprimitive_effect_handlers.mjs
+        run: node scripts/finalize_effect_runtime_v1.mjs
 
       - name: Validate generated diff
         run: |
