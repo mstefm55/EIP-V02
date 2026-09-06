@@ -5,7 +5,7 @@ on:
     branches:
       - repair/primitive-effects-v1
     paths:
-      - scripts/finalize_effect_runtime_v1.mjs
+      - scripts/cleanup_effect_runtime_freeze_v1.mjs
       - .github/workflows/apply-primitive-effect-runtime-repair.yml
 
 permissions:
@@ -27,8 +27,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Apply final primitive Effect runtime repair
-        run: node scripts/finalize_effect_runtime_v1.mjs
+      - name: Remove integration residue from Effect runtime
+        run: node scripts/cleanup_effect_runtime_freeze_v1.mjs
 
       - name: Validate generated diff
         run: |
@@ -37,7 +37,7 @@ jobs:
           node --check services/api/src/core/objectLinkJsonPatch.js
           git diff -- services/api/src/core/core_process_engine.js
 
-      - name: Commit generated runtime repair
+      - name: Commit generated runtime cleanup
         run: |
           if git diff --quiet -- services/api/src/core/core_process_engine.js; then
             echo "No runtime changes required."
@@ -46,5 +46,5 @@ jobs:
           git config user.name "eip-v2-governance-bot"
           git config user.email "eip-v2-governance-bot@users.noreply.github.com"
           git add services/api/src/core/core_process_engine.js
-          git commit -m "fix(process): finalize primitive effect runtime"
+          git commit -m "fix(process): freeze primitive effect runtime"
           git push origin HEAD:repair/primitive-effects-v1
