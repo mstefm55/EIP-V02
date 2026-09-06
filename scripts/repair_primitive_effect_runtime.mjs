@@ -105,12 +105,12 @@ function getPayloadPath(payload, path) {`
 replaceOnce(
   "runtime contract invocation",
 `    if (!EFFECT_HANDLER_REGISTRY[type]) {
-      throw new Error(\`EFFECT_HANDLER_NOT_FOUND:${type}\`);
+      throw new Error(\`EFFECT_HANDLER_NOT_FOUND:\${type}\`);
     }
 
     if (type === "CHILD_SERVICE_OBJECT_CREATE") {`,
 `    if (!EFFECT_HANDLER_REGISTRY[type]) {
-      throw new Error(\`EFFECT_HANDLER_NOT_FOUND:${type}\`);
+      throw new Error(\`EFFECT_HANDLER_NOT_FOUND:\${type}\`);
     }
     validateGovernedEffectRuntimeContract(effectGovernanceMap, resolvedEffect, effect);
 
