@@ -6,6 +6,7 @@ import {
   resolveCalculatedRef
 } from "./reasoning/processMacroBridge.js";
 import { patchServiceObjectAttrs } from "./serviceObjectJsonPatch.js";
+import { patchObjectLinkAttrs } from "./objectLinkJsonPatch.js";
 
 const TASK_STATUS_LIST_CODE = "TASK_STATUS";
 const DEFAULT_SO_STATUS_LIST_CODE = "SERVICE_OBJECT_STATUS";
@@ -62,6 +63,7 @@ const EFFECT_HANDLER_REGISTRY = {
   TASK_PATCH: "taskPatch",
   TASK_STATE_TRANSITION: "taskStateTransition",
   LINK_CREATE: "linkCreate",
+  LINK_PATCH: "linkPatch",
   LINK_REMOVE: "linkRemove",
   INFO_RECORD_CREATE: "infoRecordCreate",
   PROCESS_START: "processStart",
@@ -977,128 +979,25 @@ async function applyEffects(client, ctx, effects, payload) {
       continue;
     }
 
-    if (type === "HTTP_REQUEST") {
-      const urlRaw = resolveDynamicValue(effect?.url, ctx, payload);
-      const endpointRaw = resolveDynamicValue(effect?.endpoint, ctx, payload);
-      const connectionCodeRaw = resolveDynamicValue(
-        effect?.connection_code || effect?.gateway_connection_code || effect?.connection,
-        ctx,
-        payload
-      );
-      const methodRaw = resolveDynamicValue(effect?.method, ctx, payload);
-      const query = resolveDynamicValue(effect?.query, ctx, payload);
-      const headers = normalizeHeaders(resolveDynamicValue(effect?.headers, ctx, payload));
-      const bodyValue = resolveDynamicValue(effect?.body, ctx, payload);
-      const timeoutMs = normalizeNumber(resolveDynamicValue(effect?.timeout_ms, ctx, payload));
-
-      const response = await executeGatewayOutboundRequest(client, ctx, {
-        url: urlRaw,
-        endpoint: endpointRaw,
-        connection_code: connectionCodeRaw,
-        method: methodRaw,
-        query,
-        headers,
-        body: bodyValue,
-        timeout_ms: timeoutMs
-      });
-
-      const responseText = response.text;
-      const contentType = response.headers?.["content-type"] || "";
-      const parseMode = normalizeOptionalText(resolveDynamicValue(effect?.parse, ctx, payload)) || "auto";
-      let responseData = responseText;
-      if (parseMode === "json" || (parseMode === "auto" && contentType.includes("json"))) {
-        if (responseText) {
-          try {
-            responseData = JSON.parse(responseText);
-          } catch {
-            responseData = responseText;
-          }
-        } else {
-          responseData = null;
-        }
-      }
-
-      const requireOk = resolveDynamicValue(effect?.require_ok, ctx, payload) === true;
-      if (requireOk && !response.ok) {
-        throw new Error(`HTTP_REQUEST_FAILED:${response.status}`);
-      }
-
-      const store = resolveDynamicValue(effect?.store || {}, ctx, payload) || {};
-      const target = normalizeOptionalText(store?.target) || "service_object";
-      const key = normalizeOptionalText(store?.key) || "api_response";
-      const storeValue = { ok: response.ok, status: response.status, data: responseData, url: response.url };
-
-      if (target === "service_object") {
-        await client.query(
-          `
-          UPDATE eip_core.service_object
-          SET attrs = COALESCE(attrs,'{}'::jsonb) || $3::jsonb,
-              updated_at=now()
-          WHERE tenant_id=$1 AND id=$2
-          `,
-          [ctx.tenantId, ctx.serviceObjectId, JSON.stringify({ [key]: storeValue })]
-        );
-        applied.push({ type, target, key, status: response.status, ok: response.ok });
-        continue;
-      }
-
-      if (target === "material") {
-        const materialIdValue =
-          resolveDynamicValue(store?.material_id, ctx, payload) ||
-          resolveDynamicValue(effect?.material_id || effect?.material_code, ctx, payload);
-        const materialId = await resolveMaterialId(client, ctx.tenantId, materialIdValue);
-        if (!materialId) throw new Error("MATERIAL_ID_REQUIRED");
-
-        await client.query(
-          `
-          UPDATE eip_core.material
-          SET attrs = COALESCE(attrs,'{}'::jsonb) || $3::jsonb,
-              updated_at=now()
-          WHERE tenant_id=$1 AND id=$2
-          `,
-          [ctx.tenantId, materialId, JSON.stringify({ [key]: storeValue })]
-        );
-        applied.push({ type, target, key, material_id: materialId, status: response.status, ok: response.ok });
-        continue;
-      }
-
-      if (target === "process_instance") {
-        ctx.cursor = ctx.cursor || {};
-        ctx.cursor[key] = storeValue;
-        applied.push({ type, target, key, status: response.status, ok: response.ok });
-        continue;
-      }
-
-      if (target === "info_record") {
-        const recordType =
-          normalizeOptionalText(store?.record_type) ||
-          normalizeOptionalText(resolveDynamicValue(effect?.record_type, ctx, payload)) ||
-          "API_CALL";
-        const title = normalizeOptionalText(resolveDynamicValue(store?.title, ctx, payload));
-        const description = normalizeOptionalText(resolveDynamicValue(store?.description, ctx, payload));
-        const includeRequest = resolveDynamicValue(store?.include_request, ctx, payload) === true;
-        const recordPayload = includeRequest
-          ? { request: { url: response.url, method: response.method }, response: storeValue }
-          : { response: storeValue };
-
-        await insertInfoRecord(client, ctx, {
-          record_type: recordType,
-          title,
-          description,
-          payload: recordPayload,
-          attrs: resolveDynamicValue(store?.attrs || {}, ctx, payload)
-        });
-        applied.push({ type, target, key, status: response.status, ok: response.ok });
-        continue;
-      }
-
-      throw new Error("HTTP_REQUEST_TARGET_INVALID");
-    }
-
     if (type === "SERVICE_OBJECT_PATCH" || type === "SO_UPDATE") {
-      const title = normalizeOptionalText(
-        resolveDynamicValue(effect?.title, ctx, payload)
-      );
+      const canonicalRequest = resolvedEffect.requested_code === "SERVICE_OBJECT_PATCH";
+      const serviceObjectId =
+        normalizeOptionalText(resolveDynamicValue(effect?.service_object_id, ctx, payload)) ||
+        ctx.serviceObjectId;
+
+      const hasCode = Object.prototype.hasOwnProperty.call(effect || {}, "code");
+      const hasTitle = Object.prototype.hasOwnProperty.call(effect || {}, "title");
+      const hasOwnerAgentId = Object.prototype.hasOwnProperty.call(effect || {}, "owner_agent_id");
+      const codeValue = hasCode
+        ? normalizeOptionalText(resolveDynamicValue(effect?.code, ctx, payload))
+        : null;
+      const titleValue = hasTitle
+        ? normalizeOptionalText(resolveDynamicValue(effect?.title, ctx, payload))
+        : null;
+      const ownerAgentId = hasOwnerAgentId
+        ? normalizeOptionalText(resolveDynamicValue(effect?.owner_agent_id, ctx, payload))
+        : null;
+
       const attrsValue = resolveDynamicValue(effect?.attrs, ctx, payload);
       const attrs =
         attrsValue && typeof attrsValue === "object" && !Array.isArray(attrsValue)
@@ -1106,25 +1005,58 @@ async function applyEffects(client, ctx, effects, payload) {
           : null;
       const patchesValue = resolveDynamicValue(effect?.patches, ctx, payload);
       const patches = Array.isArray(patchesValue) && patchesValue.length > 0 ? patchesValue : null;
-      const serviceObjectId =
-        normalizeOptionalText(resolveDynamicValue(effect?.service_object_id, ctx, payload)) ||
-        ctx.serviceObjectId;
 
-      if (type === "SERVICE_OBJECT_PATCH" && (title || attrs || !patches)) {
-        throw new Error("SERVICE_OBJECT_PATCH_REQUIRES_BOUNDED_PATCHES");
+      if (canonicalRequest && effect?.attrs !== undefined) {
+        throw new Error("SERVICE_OBJECT_PATCH_ATTRS_MERGE_UNSUPPORTED");
       }
-      if (!title && !attrs && !patches) throw new Error("SO_UPDATE_EMPTY");
+      if (canonicalRequest && !hasCode && !hasTitle && !hasOwnerAgentId && !patches) {
+        throw new Error("SERVICE_OBJECT_PATCH_EMPTY");
+      }
+      if (!canonicalRequest && !hasCode && !hasTitle && !hasOwnerAgentId && !attrs && !patches) {
+        throw new Error("SO_UPDATE_EMPTY");
+      }
 
-      if (title || attrs) {
+      if (hasOwnerAgentId && ownerAgentId) {
+        const ownerRes = await client.query(
+          `
+          SELECT 1
+          FROM eip_core.agent
+          WHERE tenant_id=$1 AND id=$2 AND is_active=true
+          LIMIT 1
+          `,
+          [ctx.tenantId, ownerAgentId]
+        );
+        if (ownerRes.rowCount === 0) throw new Error("OWNER_AGENT_NOT_FOUND");
+      }
+
+      const relationalMutation = hasCode || hasTitle || hasOwnerAgentId;
+      const legacyAttrsMerge = !canonicalRequest && attrs !== null;
+      if (relationalMutation || legacyAttrsMerge) {
         const result = await client.query(
           `
           UPDATE eip_core.service_object
-          SET title = COALESCE($3, title),
-              attrs = COALESCE(attrs,'{}'::jsonb) || COALESCE($4::jsonb, '{}'::jsonb),
+          SET code = CASE WHEN $3::boolean THEN $4 ELSE code END,
+              title = CASE WHEN $5::boolean THEN $6 ELSE title END,
+              owner_agent_id = CASE WHEN $7::boolean THEN $8::uuid ELSE owner_agent_id END,
+              attrs = CASE
+                WHEN $9::boolean THEN COALESCE(attrs,'{}'::jsonb) || $10::jsonb
+                ELSE attrs
+              END,
               updated_at = now()
           WHERE tenant_id=$1 AND id=$2
           `,
-          [ctx.tenantId, serviceObjectId, title, attrs ? JSON.stringify(attrs) : null]
+          [
+            ctx.tenantId,
+            serviceObjectId,
+            hasCode,
+            codeValue,
+            hasTitle,
+            titleValue,
+            hasOwnerAgentId,
+            ownerAgentId,
+            legacyAttrsMerge,
+            legacyAttrsMerge ? JSON.stringify(attrs) : null
+          ]
         );
         if (result.rowCount === 0) throw new Error("SERVICE_OBJECT_NOT_FOUND");
       }
@@ -1141,6 +1073,11 @@ async function applyEffects(client, ctx, effects, payload) {
       applied.push({
         type,
         service_object_id: serviceObjectId,
+        relational_fields: [
+          ...(hasCode ? ["code"] : []),
+          ...(hasTitle ? ["title"] : []),
+          ...(hasOwnerAgentId ? ["owner_agent_id"] : [])
+        ],
         patch_count: patchResult?.patch_count || 0
       });
       continue;
@@ -1313,6 +1250,32 @@ async function applyEffects(client, ctx, effects, payload) {
       );
 
       applied.push({ type, relation_type: relationType });
+      continue;
+    }
+
+    if (type === "LINK_PATCH") {
+      const srcKind = normalizeOptionalText(resolveDynamicValue(effect?.src_kind, ctx, payload));
+      const dstKind = normalizeOptionalText(resolveDynamicValue(effect?.dst_kind, ctx, payload));
+      const relationType = normalizeOptionalText(resolveDynamicValue(effect?.relation_type, ctx, payload));
+      const srcId = resolveRef(effect?.src_id, ctx, payload);
+      const dstId = resolveRef(effect?.dst_id, ctx, payload);
+      const patches = resolveDynamicValue(effect?.patches, ctx, payload);
+
+      if (!srcKind || !dstKind || !relationType || !srcId || !dstId) {
+        throw new Error("LINK_FIELDS_REQUIRED");
+      }
+
+      const patchResult = await patchObjectLinkAttrs(client, {
+        tenantId: ctx.tenantId,
+        srcKind,
+        srcId,
+        dstKind,
+        dstId,
+        relationType,
+        patches
+      });
+
+      applied.push({ type, relation_type: relationType, patch_count: patchResult.patch_count });
       continue;
     }
 
