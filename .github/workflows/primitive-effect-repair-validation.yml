@@ -47,6 +47,6 @@ jobs:
         working-directory: services/api
         run: node --test test/governedReasoningV1.test.mjs
 
-      - name: Run temporal calendar tests explicitly
+      - name: Run established temporal/resource tests explicitly
         working-directory: services/api
-        run: node --test test/temporalCalendarV1.test.mjs
+        run: node --test test/temporalResourceV1.test.mjs
