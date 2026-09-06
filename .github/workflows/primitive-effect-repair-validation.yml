@@ -1,0 +1,52 @@
+name: Primitive Effect Repair Validation
+
+on:
+  push:
+    branches:
+      - repair/primitive-effects-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-effect-repair:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Diff whitespace check
+        run: git diff --check 10b99b8376fe9b73fe8ae290a303b9695490a8db...HEAD
+
+      - name: Install API dependencies
+        working-directory: services/api
+        run: npm ci
+
+      - name: Run API test suite
+        working-directory: services/api
+        run: npm test
+
+      - name: Run Process Macro calc integration
+        working-directory: services/api
+        run: node --test test/processEngineCalcIntegration.integration.mjs
+
+      - name: Run Effect primitive tests explicitly
+        working-directory: services/api
+        run: node --test test/effectPrimitiveV1.test.mjs
+
+      - name: Run reasoning primitive tests explicitly
+        working-directory: services/api
+        run: node --test test/governedReasoningV1.test.mjs
+
+      - name: Run temporal calendar tests explicitly
+        working-directory: services/api
+        run: node --test test/temporalCalendarV1.test.mjs
