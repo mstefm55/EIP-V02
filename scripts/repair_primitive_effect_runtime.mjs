@@ -95,7 +95,7 @@ function validateGovernedEffectRuntimeContract(effectGovernanceMap, resolvedEffe
   const allowed = new Set(allowedFields.map((field) => String(field)));
   for (const key of Object.keys(effect || {})) {
     if (COMMON_EFFECT_CONTRACT_FIELDS.has(key) || allowed.has(key)) continue;
-    throw new Error(`EFFECT_FIELD_UNSUPPORTED:${resolvedEffect.effect_code}:${key}`);
+    throw new Error("EFFECT_FIELD_UNSUPPORTED:" + resolvedEffect.effect_code + ":" + key);
   }
 }
 
@@ -189,7 +189,7 @@ replaceOnce(
       }
       if (type === "TASK_STATE_TRANSITION") {
         for (const field of ["title", "description", "assigned_agent_id", "due_at", "payload", "attrs"]) {
-          if (effect?.[field] !== undefined) throw new Error(\`TASK_STATE_TRANSITION_FIELD_UNSUPPORTED:${field}\`);
+          if (effect?.[field] !== undefined) throw new Error("TASK_STATE_TRANSITION_FIELD_UNSUPPORTED:" + field);
         }
       }
       const taskId = normalizeOptionalText(`
