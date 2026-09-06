@@ -1,0 +1,48 @@
+name: Apply Primitive Effect Runtime Repair
+
+on:
+  push:
+    branches:
+      - repair/primitive-effects-v1
+    paths:
+      - scripts/repair_primitive_effect_runtime.mjs
+      - .github/workflows/apply-primitive-effect-runtime-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-runtime-repair:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: repair/primitive-effects-v1
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Apply assertion-based runtime repair
+        run: node scripts/repair_primitive_effect_runtime.mjs
+
+      - name: Validate generated diff
+        run: |
+          git diff --check
+          git diff -- services/api/src/core/core_process_engine.js
+
+      - name: Commit generated runtime repair
+        run: |
+          if git diff --quiet -- services/api/src/core/core_process_engine.js; then
+            echo "No runtime changes required."
+            exit 0
+          fi
+          git config user.name "eip-v2-governance-bot"
+          git config user.email "eip-v2-governance-bot@users.noreply.github.com"
+          git add services/api/src/core/core_process_engine.js
+          git commit -m "fix(process): enforce canonical primitive effect runtime"
+          git push origin HEAD:repair/primitive-effects-v1
