@@ -276,10 +276,30 @@ function ContractTablePanel({ node, ctx }) {
       const nextItems = Array.isArray(payload?.items) ? payload.items : [];
       setItems(nextItems);
 
+      const currentSelectedId = selectedRowIdRef.current;
+      const refreshSelected = selectionConfig?.refresh_selected_record === true;
+      if (
+        refreshSelected
+        && currentSelectedId
+        && typeof selectionTargetRef.current?.select === "function"
+      ) {
+        const refreshedItem = nextItems.find((item) => {
+          const itemId =
+            item?.[selectionIdKey]
+            ?? item?.[rowIdKey]
+            ?? item?.id
+            ?? null;
+          return itemId === currentSelectedId;
+        });
+        if (refreshedItem) {
+          selectionTargetRef.current.select(refreshedItem);
+        }
+      }
+
       const autoSelect = selectionConfig?.auto_select_first === true;
       if (
         autoSelect &&
-        !selectedRowIdRef.current &&
+        !currentSelectedId &&
         !forceNewRef.current &&
         nextItems.length > 0 &&
         typeof selectionTargetRef.current?.select === "function"
@@ -296,7 +316,10 @@ function ContractTablePanel({ node, ctx }) {
     contractCtx,
     listContract,
     preloadedItems,
+    rowIdKey,
+    selectionIdKey,
     selectionConfig?.auto_select_first,
+    selectionConfig?.refresh_selected_record,
   ]);
 
   const loadRef = useRef(load);

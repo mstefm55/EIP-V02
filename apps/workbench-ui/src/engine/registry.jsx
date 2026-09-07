@@ -6,8 +6,12 @@ import ContractDetailEditor from "../components/primitives/ContractDetailEditor.
 import ContractTablePanel from "../components/primitives/ContractTablePanel.jsx";
 import ContractRecordEditor from "../components/primitives/ContractRecordEditor.jsx";
 import ContractMetricGrid from "../components/primitives/ContractMetricGrid.jsx";
+import ContractFlowStepEditor from "../components/primitives/ContractFlowStepEditor.jsx";
+import ContractActionPanel from "../components/primitives/ContractActionPanel.jsx";
 import NoticePanel from "../components/primitives/NoticePanel.jsx";
 import SelectionDetailPanel from "../components/primitives/SelectionDetailPanel.jsx";
+import FlowStepNavigator from "../components/primitives/FlowStepNavigator.jsx";
+import FlowStepPanel from "../components/primitives/FlowStepPanel.jsx";
 import FallbackNode from "../components/primitives/FallbackNode.jsx";
 
 // Primitive library is intentionally generic and domain-agnostic.
@@ -44,6 +48,14 @@ const primitiveLibrary = Object.freeze({
     component: ContractMetricGrid,
     contract: "contract_metric_grid_v1",
   }),
+  ContractFlowStepEditor: Object.freeze({
+    component: ContractFlowStepEditor,
+    contract: "contract_flow_step_editor_v1",
+  }),
+  ContractActionPanel: Object.freeze({
+    component: ContractActionPanel,
+    contract: "contract_action_panel_v1",
+  }),
   NoticePanel: Object.freeze({
     component: NoticePanel,
     contract: "notice_panel_v1",
@@ -51,6 +63,14 @@ const primitiveLibrary = Object.freeze({
   SelectionDetailPanel: Object.freeze({
     component: SelectionDetailPanel,
     contract: "selection_detail_panel_v1",
+  }),
+  FlowStepNavigator: Object.freeze({
+    component: FlowStepNavigator,
+    contract: "flow_step_navigator_v1",
+  }),
+  FlowStepPanel: Object.freeze({
+    component: FlowStepPanel,
+    contract: "flow_step_panel_v1",
   }),
   Fallback: Object.freeze({
     component: FallbackNode,

@@ -1,0 +1,155 @@
+.flow-step-navigator {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.flow-step-navigator__eyebrow {
+  margin: 0;
+  color: #7a8aa7;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+.flow-step-navigator__title {
+  margin: 0;
+  color: #1d2d4d;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.flow-step-navigator__subtitle {
+  margin: -0.35rem 0 0;
+  color: #6b7c99;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.flow-step-navigator__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.flow-step-navigator__item {
+  position: relative;
+  min-width: 0;
+}
+
+.flow-step-navigator__rail {
+  position: absolute;
+  top: 2.45rem;
+  bottom: -0.65rem;
+  left: 1.22rem;
+  width: 1px;
+  background: #dce5f2;
+}
+
+.flow-step-navigator__button {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0.5rem 0.55rem 0.68rem 0.25rem;
+  display: grid;
+  grid-template-columns: 2.05rem minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: start;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.flow-step-navigator__button:hover:not(:disabled),
+.flow-step-navigator__button:focus-visible {
+  background: #f6f9fe;
+}
+
+.flow-step-navigator__button:focus-visible {
+  outline: 2px solid rgba(60, 122, 216, 0.35);
+  outline-offset: 2px;
+}
+
+.flow-step-navigator__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.flow-step-navigator__item.is-active .flow-step-navigator__button {
+  background: #f4f8ff;
+  box-shadow: inset 0 0 0 1px #d8e6fb;
+}
+
+.flow-step-navigator__icon {
+  position: relative;
+  z-index: 1;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #cfd9e9;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #71819c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flow-step-navigator__item--complete .flow-step-navigator__icon {
+  border-color: #bce7cf;
+  background: #f0fff6;
+  color: #27945d;
+}
+
+.flow-step-navigator__item--current .flow-step-navigator__icon,
+.flow-step-navigator__item.is-active .flow-step-navigator__icon {
+  border-color: #bcd3f5;
+  background: #f2f7ff;
+  color: #316fc4;
+}
+
+.flow-step-navigator__item--warning .flow-step-navigator__icon {
+  border-color: #f0d6a2;
+  background: #fff9ec;
+  color: #a87216;
+}
+
+.flow-step-navigator__item--error .flow-step-navigator__icon {
+  border-color: #efbec5;
+  background: #fff4f6;
+  color: #b94659;
+}
+
+.flow-step-navigator__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+  padding-top: 0.13rem;
+}
+
+.flow-step-navigator__label {
+  color: #2e374c;
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.flow-step-navigator__description {
+  color: #667892;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.flow-step-navigator__status {
+  color: #8a98ae;
+  font-size: 0.64rem;
+  letter-spacing: 0.02em;
+  text-transform: capitalize;
+}
+
+.flow-step-navigator__item.is-active .flow-step-navigator__label {
+  color: #1d4f91;
+}

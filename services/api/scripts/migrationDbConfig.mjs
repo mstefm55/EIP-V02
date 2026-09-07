@@ -46,7 +46,7 @@ function resolveDbConfig(env = process.env) {
 
   if (isProduction && !host) {
     throw new Error(
-      "Migration database configuration requires V2_DATABASE_URL, DATABASE_URL, DATABASE_PUBLIC_URL, or an explicit database host in production"
+      "Migration database configuration requires DATABASE_URL or an explicit database host in production (accepted URL variables: V2_DATABASE_URL, DATABASE_URL, DATABASE_PUBLIC_URL)"
     );
   }
 
