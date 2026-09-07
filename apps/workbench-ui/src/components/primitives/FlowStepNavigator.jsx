@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   Activity,
   Check,
@@ -74,6 +74,18 @@ function resolveStepStatus(step, scopes) {
     : step.status;
 }
 
+function selectionIdentity(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+  const preferred = value.id ?? value.code ?? value.key ?? null;
+  if (preferred !== null && preferred !== undefined && preferred !== "") return String(preferred);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[selection]";
+  }
+}
+
 function StepIcon({ step, status }) {
   const Icon = ICONS[step.icon] || STATUS_ICONS[status] || Circle;
   return <Icon size={18} strokeWidth={2} aria-hidden="true" />;
@@ -87,6 +99,10 @@ function FlowStepNavigator({ node, ctx }) {
   const selectedId = readSelectedFlowStepId(selectedValue);
   const activeStep = resolveInitialFlowStep(steps, selectedId, props.default_step_id);
   const scopes = buildResolveScopes(ctx);
+  const resetOnTarget = String(props.reset_on_selection_target || "").trim().toLowerCase();
+  const resetOnValue = resetOnTarget ? ctx?.selection?.getTarget?.(resetOnTarget) || null : null;
+  const resetOnIdentity = selectionIdentity(resetOnValue);
+  const previousResetIdentityRef = useRef(resetOnIdentity);
 
   useEffect(() => {
     if (!activeStep || activeStep.disabled) return;
@@ -97,6 +113,21 @@ function FlowStepNavigator({ node, ctx }) {
       label: activeStep.label,
     });
   }, [activeStep?.id, activeStep?.label, activeStep?.disabled, selectedId, selectionTarget, ctx?.selection]);
+
+  useEffect(() => {
+    if (!resetOnTarget) return;
+    const previousIdentity = previousResetIdentityRef.current;
+    previousResetIdentityRef.current = resetOnIdentity;
+    if (previousIdentity === resetOnIdentity) return;
+
+    const defaultStep = resolveInitialFlowStep(steps, null, props.default_step_id);
+    if (!defaultStep || defaultStep.disabled) return;
+    ctx?.selection?.selectTarget?.(selectionTarget, {
+      id: defaultStep.id,
+      step_id: defaultStep.id,
+      label: defaultStep.label,
+    });
+  }, [resetOnIdentity, resetOnTarget, props.default_step_id, selectionTarget, steps, ctx?.selection]);
 
   function selectStep(step) {
     if (!step || step.disabled) return;
