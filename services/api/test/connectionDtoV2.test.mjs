@@ -58,6 +58,10 @@ test("detail DTO never projects stored secret values even from an unsafe legacy 
         Authorization: "Bearer must-not-leak",
       },
     },
+    health: {
+      status: "healthy",
+      last_successful_test_at: "2026-09-07T00:00:00Z",
+    },
     attrs: {
       nested: { api_key: "must-not-leak", note: "safe" },
     },
@@ -73,6 +77,13 @@ test("detail DTO never projects stored secret values even from an unsafe legacy 
   const encoded = JSON.stringify(dto);
   assert.equal(encoded.includes("must-not-leak"), false);
   assert.equal(dto.connection_code, "unsafe_conn");
+  assert.equal(dto.connection_name, "Unsafe legacy");
+  assert.equal(dto.connection_kind, "custom");
+  assert.equal(dto.direction, "outbound");
+  assert.equal(dto.environment, "sandbox");
+  assert.equal(dto.is_enabled, true);
+  assert.equal(dto.health_status, "healthy");
+  assert.equal(dto.last_successful_test_at, "2026-09-07T00:00:00Z");
   assert.equal(dto.outbound.auth.client_id, "safe-client-id");
   assert.equal(dto.attrs.nested.note, "safe");
   assert.equal(dto.credential_status.api_key.configured, true);
