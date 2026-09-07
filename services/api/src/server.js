@@ -17,6 +17,7 @@ import coreProcessRoutes from "./routes/process/core_process.js";
 import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 import ownerAdminConsoleRoutes from "./routes/owner_admin_console.js";
+import connectionRoutes from "./routes/connections.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 
 const DEFAULT_PORT = 4010;
@@ -145,6 +146,9 @@ function buildRuntimeConfig(overrides = {}) {
     AUTH_LOGIN_FAILURE_THRESHOLD: parseInteger(process.env.AUTH_LOGIN_FAILURE_THRESHOLD, 8),
     AUTH_LOGIN_LOCK_MIN: parseInteger(process.env.AUTH_LOGIN_LOCK_MIN, 15),
     LOG_DEV_OTP: parseBoolean(process.env.LOG_DEV_OTP, false),
+    CONNECTION_SECRET_ENCRYPTION_KEY: process.env.CONNECTION_SECRET_ENCRYPTION_KEY || null,
+    CONNECTION_SECRET_KEY_ID: process.env.CONNECTION_SECRET_KEY_ID || "connection-v1",
+    CONNECTION_SECRET_STEP_UP_MIN: parseInteger(process.env.CONNECTION_SECRET_STEP_UP_MIN, 10),
     EMAIL_PROVIDER: process.env.EMAIL_PROVIDER || null,
     EMAIL_API_KEY: process.env.EMAIL_API_KEY || null,
     EMAIL_API_BASE_URL: process.env.EMAIL_API_BASE_URL || DEFAULT_BREVO_API_URL,
@@ -222,6 +226,7 @@ async function buildServer(options = {}) {
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
   await app.register(ownerAdminConsoleRoutes, { prefix: "/api/eip" });
+  await app.register(connectionRoutes, { prefix: "/api/eip" });
   await app.register(planningScheduleRoutes, { prefix: "/api/eip" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip/core" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip" });
