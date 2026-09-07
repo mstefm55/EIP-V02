@@ -14,6 +14,8 @@ test("flow step primitives are allowlisted in the generic UI registry", async ()
   assert.match(registry, /flow_step_navigator_v1/);
   assert.match(registry, /FlowStepPanel/);
   assert.match(registry, /flow_step_panel_v1/);
+  assert.match(registry, /ContractFlowStepEditor/);
+  assert.match(registry, /contract_flow_step_editor_v1/);
 });
 
 test("flow step primitives remain domain neutral", async () => {
@@ -21,6 +23,8 @@ test("flow step primitives remain domain neutral", async () => {
     await read("components/primitives/FlowStepNavigator.jsx"),
     await read("components/primitives/FlowStepPanel.jsx"),
     await read("components/primitives/flowStepModel.js"),
+    await read("components/primitives/ContractFlowStepEditor.jsx"),
+    await read("components/primitives/contractStepEditorModel.js"),
   ].join("\n");
 
   const forbiddenBusinessTokens = [
@@ -51,4 +55,15 @@ test("flow step navigator delegates selection through the generic target model",
   assert.match(navigator, /getTarget/);
   assert.match(panel, /selection_target/);
   assert.match(panel, /getTarget/);
+});
+
+test("contract flow step editor uses governed contracts rather than embedded endpoints", async () => {
+  const editor = await read("components/primitives/ContractFlowStepEditor.jsx");
+
+  assert.match(editor, /resolveContract/);
+  assert.match(editor, /detail_contract/);
+  assert.match(editor, /update_contract/);
+  assert.match(editor, /record_selection_target/);
+  assert.equal(/\/api\/eip\//.test(editor), false);
+  assert.equal(/fetch\s*\(/.test(editor), false);
 });
