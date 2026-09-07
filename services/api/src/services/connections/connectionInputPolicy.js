@@ -23,6 +23,15 @@ const FORBIDDEN_HEADER_KEYS = new Set([
   "setcookie",
   "xapikey",
 ]);
+const SERVER_OWNED_ROOT_KEYS = new Set([
+  "id",
+  "tenantid",
+  "settingstatus",
+  "health",
+  "credentialstatus",
+  "createdat",
+  "updatedat",
+]);
 
 class ConnectionInputPolicyError extends Error {
   constructor(message, code = "CONNECTION_SECRET_IN_PROFILE_FORBIDDEN", status = 400, path = null) {
@@ -85,10 +94,19 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
   }
 
   for (const [key, entry] of Object.entries(value)) {
+    const compact = compactKey(key);
     if (FORBIDDEN_OBJECT_KEYS.has(key)) {
       throw new ConnectionInputPolicyError(
         "Connection profile contains a forbidden object key.",
         "CONNECTION_PROFILE_KEY_FORBIDDEN",
+        400,
+        `${path}.${key}`
+      );
+    }
+    if (compact === "tenantid" || (depth === 0 && SERVER_OWNED_ROOT_KEYS.has(compact))) {
+      throw new ConnectionInputPolicyError(
+        "Tenant scope and server-owned connection state cannot be supplied by the client.",
+        "CONNECTION_SERVER_OWNED_FIELD_FORBIDDEN",
         400,
         `${path}.${key}`
       );
@@ -102,7 +120,7 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
       );
     }
 
-    if (compactKey(path).endsWith("defaultheaders") && FORBIDDEN_HEADER_KEYS.has(compactKey(key))) {
+    if (compactKey(path).endsWith("defaultheaders") && FORBIDDEN_HEADER_KEYS.has(compact)) {
       throw new ConnectionInputPolicyError(
         "Sensitive authentication headers must not be persisted in connection profile metadata.",
         "CONNECTION_SENSITIVE_HEADER_FORBIDDEN",
