@@ -1,11 +1,14 @@
 import { useEffect } from "react";
 import {
+  Activity,
   Check,
   Circle,
   CircleAlert,
   CircleCheck,
   CircleDashed,
   CircleX,
+  FileClock,
+  Gauge,
   KeyRound,
   Link,
   Network,
@@ -26,14 +29,18 @@ import "./FlowStepNavigator.css";
 const ICONS = Object.freeze({
   check: Check,
   identity: Link,
+  endpoint: Network,
+  network: Network,
   inbound: Radio,
   outbound: Send,
   security: ShieldCheck,
   verification: ShieldCheck,
+  reliability: Gauge,
   idempotency: KeyRound,
   routing: Route,
-  audit: SlidersHorizontal,
-  network: Network,
+  health: Activity,
+  audit: FileClock,
+  advanced: SlidersHorizontal,
 });
 
 const STATUS_ICONS = Object.freeze({
