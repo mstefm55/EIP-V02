@@ -9,6 +9,7 @@ import ContractMetricGrid from "../components/primitives/ContractMetricGrid.jsx"
 import NoticePanel from "../components/primitives/NoticePanel.jsx";
 import SelectionDetailPanel from "../components/primitives/SelectionDetailPanel.jsx";
 import FlowStepNavigator from "../components/primitives/FlowStepNavigator.jsx";
+import FlowStepPanel from "../components/primitives/FlowStepPanel.jsx";
 import FallbackNode from "../components/primitives/FallbackNode.jsx";
 
 // Primitive library is intentionally generic and domain-agnostic.
@@ -56,6 +57,10 @@ const primitiveLibrary = Object.freeze({
   FlowStepNavigator: Object.freeze({
     component: FlowStepNavigator,
     contract: "flow_step_navigator_v1",
+  }),
+  FlowStepPanel: Object.freeze({
+    component: FlowStepPanel,
+    contract: "flow_step_panel_v1",
   }),
   Fallback: Object.freeze({
     component: FallbackNode,
