@@ -106,6 +106,10 @@ export function normalizeStepEditorFields(rawFields, options = {}) {
 }
 
 function toDraftValue(field, rawValue) {
+  // Secret/password inputs are write-only in the UI. Even if an unsafe backend
+  // accidentally includes a value, never project it back into the form.
+  if (field.type === "password") return "";
+
   if (rawValue === undefined || rawValue === null) {
     if (field.type === "checkbox") return Boolean(field.default_value);
     if (field.type === "number") {
