@@ -1,0 +1,113 @@
+.contract-action-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-color, #dbe4ee);
+  border-radius: 14px;
+  background: var(--surface-raised, #ffffff);
+}
+
+.contract-action-panel__header {
+  display: grid;
+  gap: 4px;
+}
+
+.contract-action-panel__header h4,
+.contract-action-panel__header p {
+  margin: 0;
+}
+
+.contract-action-panel__header > p:last-child {
+  color: var(--text-muted, #64748b);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.contract-action-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.contract-action-panel__field,
+.contract-action-panel__toggle {
+  display: grid;
+  gap: 6px;
+}
+
+.contract-action-panel__field-label,
+.contract-action-panel__toggle strong {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--text-primary, #172033);
+}
+
+.contract-action-panel__field input,
+.contract-action-panel__field select,
+.contract-action-panel__field textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.contract-action-panel__toggle {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+}
+
+.contract-action-panel__toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.contract-action-panel__help,
+.contract-action-panel__toggle small {
+  color: var(--text-muted, #64748b);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.contract-action-panel__error {
+  color: var(--danger-color, #b42318);
+  font-size: 0.75rem;
+}
+
+.contract-action-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.contract-action-panel__status {
+  min-height: 1.2em;
+  color: var(--text-muted, #64748b);
+  font-size: 0.8rem;
+}
+
+.contract-action-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .contract-action-panel {
+    padding: 13px;
+  }
+
+  .contract-action-panel__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-action-panel__footer,
+  .contract-action-panel__actions {
+    width: 100%;
+  }
+
+  .contract-action-panel__actions {
+    margin-left: 0;
+  }
+}
