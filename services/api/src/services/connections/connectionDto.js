@@ -117,10 +117,18 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
   const outboundAuth = outbound.auth || {};
   const routing = profile?.routing || {};
   const audit = profile?.audit || {};
+  const health = sanitizePublicJson(profile?.health || {}) || {};
 
   return {
     id: profile?.id || null,
     connection_code: optionalText(identity.connection_code),
+    connection_name: optionalText(identity.connection_name),
+    connection_kind: optionalText(identity.connection_kind),
+    direction: optionalText(identity.direction),
+    environment: optionalText(identity.environment),
+    is_enabled: identity.is_enabled === true,
+    health_status: optionalText(health.status) || "unknown",
+    last_successful_test_at: health.last_successful_test_at || null,
     profile_version: finiteNumber(profile?.profile_version, 1),
     identity: {
       connection_name: optionalText(identity.connection_name),
@@ -214,7 +222,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
       log_level: optionalText(audit.log_level),
     },
     attrs: sanitizePublicJson(profile?.attrs || {}) || {},
-    health: sanitizePublicJson(profile?.health || {}) || {},
+    health,
     credential_status: sanitizeCredentialStatus(credentialStatus),
     setting_status: optionalText(profile?.setting_status) || "active",
     created_at: profile?.created_at || null,
