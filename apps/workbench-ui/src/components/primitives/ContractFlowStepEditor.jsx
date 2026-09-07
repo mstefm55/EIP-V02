@@ -27,6 +27,10 @@ function fieldInputType(type) {
   return "text";
 }
 
+function isMultilineField(type) {
+  return ["textarea", "string_list", "json_object"].includes(type);
+}
+
 function buildContractContext(ctx) {
   return {
     surfaceProps: ctx?.surfaceProps || {},
@@ -344,7 +348,7 @@ function ContractFlowStepEditor({ node, ctx }) {
         <span className="contract-flow-step-editor__field-label">
           {field.label}{field.required ? " *" : ""}
         </span>
-        {field.type === "textarea" ? (
+        {isMultilineField(field.type) ? (
           <textarea
             rows={field.rows}
             value={value}
