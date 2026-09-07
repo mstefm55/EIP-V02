@@ -44,3 +44,22 @@ test("owner admin shell uses governed surface discovery and supports planning ic
   assert.match(shell, /\/api\/eip\/owner-admin\/account/);
   assert.doesNotMatch(shell, /owner-admin\/modules/);
 });
+
+test("owner admin navigation availability is metadata-driven", () => {
+  const catalog = read("services/api/src/routes/ui_surface.js");
+  const shell = read("apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx");
+  const migration = read("db/migrations/v2_0039_owner_admin_console_operational_composition.sql");
+
+  assert.match(catalog, /surface_nav,enabled/);
+  assert.match(catalog, /nav_enabled/);
+  assert.match(catalog, /nav_hint/);
+  assert.match(shell, /surface\.is_enabled === false/);
+  assert.match(shell, /entry\.disabled/);
+  assert.match(shell, /owner-surface-disabled-note/);
+  assert.match(migration, /'owner_tenant_requests', false/);
+  assert.match(migration, /'owner_connections', false/);
+  assert.match(migration, /'owner_reports', true/);
+  assert.match(migration, /\/api\/eip\/owner-admin\/overview/);
+  assert.match(migration, /\/api\/eip\/owner-admin\/activity\?limit=50/);
+  assert.doesNotMatch(migration, /owner_admin\.[a-z_]+/i);
+});
