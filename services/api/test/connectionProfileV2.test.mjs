@@ -102,6 +102,32 @@ test("recursive sanitizer blocks prototype and common credential keys", () => {
   assert.deepEqual(sanitized, { safe: "value", nested: { label: "kept" } });
 });
 
+test("new profiles default to disabled drafts without inventing governed reference values", () => {
+  const profile = normalizeProfile({
+    identity: {
+      connection_name: "Draft",
+      connection_code: "draft_conn",
+      connection_kind: "custom",
+      direction: "outbound",
+      environment: "sandbox",
+    },
+  });
+
+  assert.equal(profile.identity.is_enabled, false);
+  assert.equal(profile.verification.mode, "");
+  assert.equal(profile.outbound.auth_mode, "");
+  assert.equal(profile.routing.channel, "");
+  assert.equal(profile.routing.mapping_mode, "");
+  assert.equal(profile.audit.log_level, "");
+  assert.deepEqual(validateConnectionProfile(profile, taxonomy), []);
+
+  profile.identity.is_enabled = true;
+  const activationErrors = validateConnectionProfile(profile, taxonomy);
+  assert.ok(activationErrors.some((error) => error.path === "outbound.base_url"));
+  assert.ok(activationErrors.some((error) => error.path === "verification.mode"));
+  assert.ok(activationErrors.some((error) => error.path === "routing.channel"));
+});
+
 test("production inbound profile fails closed when verification is none", () => {
   const profile = validProfile({
     identity: {
