@@ -72,6 +72,7 @@ test("detail DTO never projects stored secret values even from an unsafe legacy 
 
   const encoded = JSON.stringify(dto);
   assert.equal(encoded.includes("must-not-leak"), false);
+  assert.equal(dto.connection_code, "unsafe_conn");
   assert.equal(dto.outbound.auth.client_id, "safe-client-id");
   assert.equal(dto.attrs.nested.note, "safe");
   assert.equal(dto.credential_status.api_key.configured, true);
