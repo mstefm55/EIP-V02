@@ -20,6 +20,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install API dependencies
+        working-directory: services/api
+        run: npm ci
+
+      - name: Validate full API unit regression suite
+        working-directory: services/api
+        run: npm test
+
       - name: Install Workbench UI dependencies
         working-directory: apps/workbench-ui
         run: npm ci
