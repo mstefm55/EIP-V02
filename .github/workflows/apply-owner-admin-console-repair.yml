@@ -1,0 +1,47 @@
+name: Apply Owner Admin Console Repair
+
+on:
+  push:
+    branches:
+      - repair/owner-admin-console-v1
+    paths:
+      - scripts/apply_owner_admin_console_v1.mjs
+      - .github/workflows/apply-owner-admin-console-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-owner-admin-repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: repair/owner-admin-console-v1
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Apply generic console repair
+        run: node scripts/apply_owner_admin_console_v1.mjs
+
+      - name: Validate generated sources
+        run: |
+          git diff --check
+          node --check services/api/src/routes/ui_surface.js
+
+      - name: Commit generated UI-engine changes
+        run: |
+          if git diff --quiet -- services/api/src/routes/ui_surface.js apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx apps/workbench-ui/src/styles.css; then
+            echo "No generated changes required."
+            exit 0
+          fi
+          git config user.name "eip-v2-governance-bot"
+          git config user.email "eip-v2-governance-bot@users.noreply.github.com"
+          git add services/api/src/routes/ui_surface.js apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx apps/workbench-ui/src/styles.css
+          git commit -m "fix(ui): support governed admin surface availability"
+          git push origin HEAD:repair/owner-admin-console-v1
