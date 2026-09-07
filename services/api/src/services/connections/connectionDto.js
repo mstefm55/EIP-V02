@@ -120,6 +120,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
 
   return {
     id: profile?.id || null,
+    connection_code: optionalText(identity.connection_code),
     profile_version: finiteNumber(profile?.profile_version, 1),
     identity: {
       connection_name: optionalText(identity.connection_name),
