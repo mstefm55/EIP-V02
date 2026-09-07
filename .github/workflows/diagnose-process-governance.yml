@@ -27,69 +27,56 @@ jobs:
 
       - name: Core engine or route contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "core_process_engine|routes/process" pg.txt'
 
       - name: Historical migration contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "v2_00[0-9][0-9]" pg.txt'
 
       - name: Architecture documentation contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "docs/architecture|docs/dev" pg.txt'
 
       - name: App contract
         if: always()
-        continue-on-error: true
         run: '! grep -Fq "apps/workbench-ui/src/App.jsx" pg.txt'
 
       - name: UI surface route contract
         if: always()
-        continue-on-error: true
         run: '! grep -Fq "services/api/src/routes/ui_surface.js" pg.txt'
 
       - name: Owner Admin shell contract
         if: always()
-        continue-on-error: true
         run: '! grep -Fq "apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx" pg.txt'
 
       - name: Surface loader cache or theme contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "useSurfaceLoader|useSurfaceCatalog|surfaceCache|themeGovernance|renderer.jsx" pg.txt'
 
       - name: Registry or component namespace contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "registry.jsx|src/components:" pg.txt'
 
       - name: Workbench smoke contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "package.json|workbench.authenticated.smoke" pg.txt'
 
       - name: Primitive component artifact contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "ContractDetailEditor|SplitLayout|LoginPanel" pg.txt'
 
       - name: Surface payload or Playwright artifact contract
         if: always()
-        continue-on-error: true
         run: '! grep -Eq "surfacePayload|playwright.config" pg.txt'
 
       - name: Generic missing artifact contract
         if: always()
-        continue-on-error: true
         run: '! grep -Fq "missing required governance artifact" pg.txt'
 
       - name: Unclassified validator failure
         if: always()
         run: |
           if grep -q '^-' pg.txt; then
-            echo "Process governance validator still reports failures."
             exit 1
           fi
           exit 0
