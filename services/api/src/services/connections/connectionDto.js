@@ -70,6 +70,28 @@ function sanitizePublicJson(value, depth = 0) {
   return output;
 }
 
+function sanitizeCredentialStatus(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const output = {};
+
+  for (const [rawKind, rawStatus] of Object.entries(value)) {
+    const kind = text(rawKind).trim().toLowerCase();
+    if (!kind || kind.length > 64 || FORBIDDEN_KEYS.has(kind)) continue;
+    if (!rawStatus || typeof rawStatus !== "object" || Array.isArray(rawStatus)) continue;
+
+    output[kind] = {
+      configured: rawStatus.configured === true,
+      status: optionalText(rawStatus.status) || "missing",
+      version: finiteNumber(rawStatus.version),
+      fingerprint: optionalText(rawStatus.fingerprint),
+      last_rotated_at: rawStatus.last_rotated_at || null,
+      revoked_at: rawStatus.revoked_at || null,
+    };
+  }
+
+  return output;
+}
+
 function toConnectionSummaryDto(profile) {
   return {
     id: profile?.id || null,
@@ -192,7 +214,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
     },
     attrs: sanitizePublicJson(profile?.attrs || {}) || {},
     health: sanitizePublicJson(profile?.health || {}) || {},
-    credential_status: sanitizePublicJson(credentialStatus || {}) || {},
+    credential_status: sanitizeCredentialStatus(credentialStatus),
     setting_status: optionalText(profile?.setting_status) || "active",
     created_at: profile?.created_at || null,
     updated_at: profile?.updated_at || null,
@@ -201,6 +223,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
 
 export {
   isSensitiveKey,
+  sanitizeCredentialStatus,
   sanitizePublicJson,
   toConnectionDetailDto,
   toConnectionSummaryDto,
