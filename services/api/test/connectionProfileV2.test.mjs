@@ -108,12 +108,12 @@ test("new profiles default to disabled drafts without inventing governed referen
       connection_name: "Draft",
       connection_code: "draft_conn",
       connection_kind: "custom",
-      direction: "outbound",
       environment: "sandbox",
     },
   });
 
   assert.equal(profile.identity.is_enabled, false);
+  assert.equal(profile.identity.direction, "");
   assert.equal(profile.verification.mode, "");
   assert.equal(profile.outbound.auth_mode, "");
   assert.equal(profile.routing.channel, "");
@@ -123,7 +123,7 @@ test("new profiles default to disabled drafts without inventing governed referen
 
   profile.identity.is_enabled = true;
   const activationErrors = validateConnectionProfile(profile, taxonomy);
-  assert.ok(activationErrors.some((error) => error.path === "outbound.base_url"));
+  assert.ok(activationErrors.some((error) => error.path === "identity.direction"));
   assert.ok(activationErrors.some((error) => error.path === "verification.mode"));
   assert.ok(activationErrors.some((error) => error.path === "routing.channel"));
 });
