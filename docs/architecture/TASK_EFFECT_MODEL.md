@@ -164,6 +164,7 @@ This lets materially different domains update relationship facts such as allocat
 ## Effect governance
 
 - Effect catalog authority is anchored in governed metadata such as `PROCESS_EFFECT_TYPE`.
+- Governed metadata resolves the canonical executable identity through `canonical_effect_code`; aliases may point to that canonical code but may not redefine executable semantics.
 - Runtime dispatch handlers remain code-owned, finite, and reviewed.
 - Metadata may activate/deactivate, alias, version, or constrain an Effect contract, but may not execute arbitrary code.
 - Every active canonical Effect must have runtime coverage and parameter validation.
