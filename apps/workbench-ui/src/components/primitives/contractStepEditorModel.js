@@ -74,6 +74,7 @@ export function normalizeStepEditorField(rawField) {
   const options = Array.isArray(rawField.options)
     ? rawField.options.map(normalizeOption).filter(Boolean).slice(0, 100)
     : [];
+  const optionsPath = normalizeText(rawField.options_path);
 
   return {
     key,
@@ -86,8 +87,12 @@ export function normalizeStepEditorField(rawField) {
     help: normalizeText(rawField.help),
     rows: Math.max(2, Math.min(12, Number(rawField.rows) || 4)),
     options,
+    options_path: optionsPath && safePathSegments(optionsPath) ? optionsPath : "",
+    option_value_key: normalizeText(rawField.option_value_key || "code") || "code",
+    option_label_key: normalizeText(rawField.option_label_key || "label") || "label",
     default_value: rawField.default_value,
     omit_empty: rawField.omit_empty === true,
+    immutable_after_create: rawField.immutable_after_create === true,
   };
 }
 
@@ -103,6 +108,26 @@ export function normalizeStepEditorFields(rawFields, options = {}) {
     output.push(field);
   }
   return output;
+}
+
+export function resolveStepEditorFieldOptions(field, optionsPayload) {
+  if (!field) return [];
+  const remote = field.options_path ? getSafePath(optionsPayload, field.options_path) : null;
+  if (!Array.isArray(remote)) return field.options || [];
+
+  const options = [];
+  const seen = new Set();
+  for (const entry of remote.slice(0, 200)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const value = normalizeText(entry[field.option_value_key]);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    options.push({
+      value,
+      label: normalizeText(entry[field.option_label_key]) || value,
+    });
+  }
+  return options.length > 0 ? options : field.options || [];
 }
 
 function toDraftValue(field, rawValue) {
@@ -147,13 +172,15 @@ export function validateStepEditorDraft(draft, fields) {
   return errors;
 }
 
-export function patchRecordFromStepDraft(baseRecord, draft, fields) {
+export function patchRecordFromStepDraft(baseRecord, draft, fields, options = {}) {
   let output = baseRecord && typeof baseRecord === "object" && !Array.isArray(baseRecord)
     ? structuredClone(baseRecord)
     : {};
+  const isCreate = options.isCreate === true;
 
   for (const field of Array.isArray(fields) ? fields : []) {
     if (!Object.prototype.hasOwnProperty.call(draft || {}, field.key)) continue;
+    if (!isCreate && field.immutable_after_create) continue;
     let value = draft[field.key];
     if (field.type === "number") {
       const parsed = Number(value);
