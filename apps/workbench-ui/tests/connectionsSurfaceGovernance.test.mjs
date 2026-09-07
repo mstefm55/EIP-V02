@@ -27,6 +27,7 @@ function walk(node, visit) {
 }
 
 const migration = read("db/migrations/v2_0043_connection_management_surface_v1.sql");
+const releaseMigration = read("db/migrations/v2_0044_connection_management_surface_enable.sql");
 const tree = parseSurfaceTree(migration);
 
 function nodesOfType(type) {
@@ -144,4 +145,17 @@ test("migration 43 remains a pre-release composition and does not enable navigat
   assert.match(migration, /'\{\"enabled\":false,/);
   assert.match(migration, /Pre-release validation/);
   assert.doesNotMatch(migration, /'\{\"enabled\":true,/);
+});
+
+test("migration 44 only enables the validated owner_connections navigation entry", () => {
+  assert.doesNotMatch(releaseMigration, /SET\s+tree\s*=/i);
+  assert.equal((releaseMigration.match(/UPDATE\s+eip_core\.ui_surface/gi) || []).length, 1);
+  assert.match(releaseMigration, /code = 'owner_connections'/);
+  assert.match(releaseMigration, /connection_setup_v1/);
+  assert.match(releaseMigration, /'\{surface_nav,enabled\}'/);
+  assert.match(releaseMigration, /'true'::jsonb/);
+  assert.match(releaseMigration, /'\"v2_0044\"'::jsonb/);
+  assert.doesNotMatch(releaseMigration, /UPDATE\s+eip_auth\./i);
+  assert.doesNotMatch(releaseMigration, /INSERT\s+INTO\s+eip_auth\./i);
+  assert.doesNotMatch(releaseMigration, /ALTER\s+TABLE/i);
 });
