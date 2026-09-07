@@ -1,0 +1,348 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch, describeApiError } from "../../services/apiClient.js";
+import { resolveContract, resolveValue } from "../../engine/contracts.js";
+import {
+  buildStepEditorDraft,
+  getSafePath,
+  normalizeStepEditorFields,
+  patchRecordFromStepDraft,
+  validateStepEditorDraft,
+} from "./contractStepEditorModel.js";
+import StateNotice from "./StateNotice.jsx";
+import "./ContractFlowStepEditor.css";
+
+function normalizeText(value) {
+  return String(value ?? "").trim();
+}
+
+function hasAnyPermission(session, expected = []) {
+  if (!Array.isArray(expected) || expected.length === 0) return true;
+  const granted = Array.isArray(session?.permissions) ? session.permissions : [];
+  return expected.some((permission) => granted.includes(permission));
+}
+
+function fieldInputType(type) {
+  if (["number", "password", "url", "email"].includes(type)) return type;
+  return "text";
+}
+
+function buildContractContext(ctx) {
+  return {
+    surfaceProps: ctx?.surfaceProps || {},
+    surfaceMeta: ctx?.surfaceMeta || {},
+    availableSurfaces: ctx?.availableSurfaces || [],
+    selection: {
+      definition: ctx?.selection?.definition || {},
+      targets: ctx?.selection?.targets || {},
+    },
+    auth: {
+      session: ctx?.auth?.session || {},
+    },
+  };
+}
+
+function resolveResponseRecord(payload, path) {
+  const preferredPath = normalizeText(path || "item");
+  if (!preferredPath) return payload && typeof payload === "object" ? payload : null;
+  const value = getSafePath(payload, preferredPath);
+  return value && typeof value === "object" ? value : null;
+}
+
+function ContractFlowStepEditor({ node, ctx }) {
+  const props = node?.props || {};
+  const fieldsKey = JSON.stringify(props.fields || []);
+  const fields = useMemo(
+    () => normalizeStepEditorFields(props.fields, { maxFields: props.max_fields }),
+    [fieldsKey, props.max_fields]
+  );
+  const recordSelectionTarget = normalizeText(props.record_selection_target || "definition").toLowerCase();
+  const selectedRecord = ctx?.selection?.getTarget?.(recordSelectionTarget) || null;
+  const selectedRecordId = selectedRecord?.id || selectedRecord?.code || null;
+  const canAuthor = hasAnyPermission(ctx?.auth?.session, props.permissions_any);
+  const contractCtx = useMemo(() => buildContractContext(ctx), [
+    ctx?.auth?.session,
+    ctx?.availableSurfaces,
+    ctx?.selection?.definition,
+    ctx?.selection?.targets,
+    ctx?.surfaceMeta,
+    ctx?.surfaceProps,
+  ]);
+
+  const [record, setRecord] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const loadTokenRef = useRef(0);
+
+  const basicFields = fields.filter((field) => !field.advanced);
+  const advancedFields = fields.filter((field) => field.advanced);
+
+  const load = useCallback(async () => {
+    const loadToken = loadTokenRef.current + 1;
+    loadTokenRef.current = loadToken;
+    setError(null);
+    setStatus(null);
+    setFieldErrors({});
+
+    if (!selectedRecordId) {
+      setRecord(null);
+      setDraft(null);
+      return;
+    }
+
+    if (!props.detail_contract) {
+      const fallbackRecord = selectedRecord && typeof selectedRecord === "object" ? selectedRecord : {};
+      setRecord(fallbackRecord);
+      setDraft(buildStepEditorDraft(fallbackRecord, fields));
+      return;
+    }
+
+    const resolved = resolveContract(props.detail_contract, contractCtx, {
+      pathParams: { id: selectedRecordId },
+    });
+    if (!resolved) {
+      setRecord(null);
+      setDraft(null);
+      setError(props.unconfigured_message || "This editor is not configured yet.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = await apiFetch(resolved.pathWithQuery, { method: resolved.method });
+      if (loadTokenRef.current !== loadToken) return;
+      const nextRecord = resolveResponseRecord(payload, props.detail_item_path) || {};
+      setRecord(nextRecord);
+      setDraft(buildStepEditorDraft(nextRecord, fields));
+    } catch (err) {
+      if (loadTokenRef.current !== loadToken) return;
+      setRecord(null);
+      setDraft(null);
+      setError(describeApiError(err, props.error_title || "Unable to load details."));
+    } finally {
+      if (loadTokenRef.current === loadToken) setLoading(false);
+    }
+  }, [
+    contractCtx,
+    fields,
+    props.detail_contract,
+    props.detail_item_path,
+    props.error_title,
+    props.unconfigured_message,
+    selectedRecord,
+    selectedRecordId,
+  ]);
+
+  useEffect(() => {
+    load();
+  }, [load, ctx?.workbench?.refreshNonce]);
+
+  function patchDraft(key, value) {
+    setDraft((previous) => (previous ? { ...previous, [key]: value } : previous));
+    setFieldErrors((previous) => {
+      if (!previous[key]) return previous;
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
+    setStatus(null);
+  }
+
+  function buildSavePayload() {
+    const scopes = {
+      surface: ctx?.surfaceProps || {},
+      surface_meta: ctx?.surfaceMeta || {},
+      selections: ctx?.selection?.targets || {},
+      selection: ctx?.selection?.definition || {},
+      auth: ctx?.auth?.session || {},
+      record: record || {},
+      draft: draft || {},
+    };
+    const saveConfig = props.save_payload || {};
+    const template = saveConfig.template !== undefined
+      ? resolveValue(saveConfig.template, scopes)
+      : saveConfig.preserve_record === true
+        ? record || {}
+        : {};
+    const base = template && typeof template === "object" && !Array.isArray(template) ? template : {};
+    const patched = patchRecordFromStepDraft(base, draft, fields);
+    const root = normalizeText(saveConfig.payload_root);
+    return root ? { [root]: patched } : patched;
+  }
+
+  const save = useCallback(async () => {
+    if (!selectedRecordId || !draft) return;
+    if (!canAuthor) {
+      setStatus(props.read_only_message || "This session is read-only for this panel.");
+      return;
+    }
+
+    const validationErrors = validateStepEditorDraft(draft, fields);
+    if (validationErrors.length > 0) {
+      setFieldErrors(Object.fromEntries(validationErrors.map((entry) => [entry.key, entry.message])));
+      setStatus(props.validation_message || "Complete the required fields before saving.");
+      return;
+    }
+
+    const resolved = resolveContract(props.update_contract, contractCtx, {
+      pathParams: { id: selectedRecordId },
+    });
+    if (!resolved) {
+      setStatus(props.unconfigured_message || "Save settings are not configured yet.");
+      return;
+    }
+
+    setSaving(true);
+    setStatus(null);
+    try {
+      const payload = buildSavePayload();
+      const response = await apiFetch(resolved.pathWithQuery, {
+        method: resolved.method,
+        body: payload,
+      });
+      const savedRecord = resolveResponseRecord(response, props.update_item_path);
+      if (savedRecord) {
+        setRecord(savedRecord);
+        setDraft(buildStepEditorDraft(savedRecord, fields));
+        ctx?.selection?.selectTarget?.(recordSelectionTarget, savedRecord);
+      }
+      setStatus(props.saved_message || "Changes saved.");
+      ctx?.workbench?.refresh?.();
+    } catch (err) {
+      setStatus(describeApiError(err, props.save_error_message || "Unable to save changes."));
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    canAuthor,
+    contractCtx,
+    draft,
+    fields,
+    props,
+    recordSelectionTarget,
+    selectedRecordId,
+    ctx?.selection,
+    ctx?.workbench,
+  ]);
+
+  function renderField(field) {
+    const value = draft?.[field.key] ?? (field.type === "checkbox" ? false : "");
+    const errorMessage = fieldErrors[field.key] || null;
+
+    if (field.type === "checkbox") {
+      return (
+        <label key={field.key} className="contract-flow-step-editor__toggle">
+          <input
+            type="checkbox"
+            checked={value === true}
+            onChange={(event) => patchDraft(field.key, event.target.checked)}
+            disabled={!canAuthor || saving}
+          />
+          <span>
+            <strong>{field.label}</strong>
+            {field.help ? <small>{field.help}</small> : null}
+          </span>
+        </label>
+      );
+    }
+
+    return (
+      <label key={field.key} className="contract-flow-step-editor__field">
+        <span className="contract-flow-step-editor__field-label">
+          {field.label}{field.required ? " *" : ""}
+        </span>
+        {field.type === "textarea" ? (
+          <textarea
+            rows={field.rows}
+            value={value}
+            placeholder={field.placeholder}
+            onChange={(event) => patchDraft(field.key, event.target.value)}
+            disabled={!canAuthor || saving}
+            aria-invalid={Boolean(errorMessage)}
+          />
+        ) : field.type === "select" ? (
+          <select
+            value={value}
+            onChange={(event) => patchDraft(field.key, event.target.value)}
+            disabled={!canAuthor || saving}
+            aria-invalid={Boolean(errorMessage)}
+          >
+            <option value="">{field.placeholder || "Select..."}</option>
+            {field.options.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type={fieldInputType(field.type)}
+            value={value}
+            placeholder={field.placeholder}
+            onChange={(event) => {
+              const nextValue = field.type === "number" ? Number(event.target.value) : event.target.value;
+              patchDraft(field.key, nextValue);
+            }}
+            disabled={!canAuthor || saving}
+            autoComplete={field.type === "password" ? "new-password" : undefined}
+            aria-invalid={Boolean(errorMessage)}
+          />
+        )}
+        {field.help ? <small className="contract-flow-step-editor__help">{field.help}</small> : null}
+        {errorMessage ? <small className="contract-flow-step-editor__error">{errorMessage}</small> : null}
+      </label>
+    );
+  }
+
+  if (!selectedRecordId) {
+    return <StateNotice title={props.selection_required_message || "Select a record to configure it."} />;
+  }
+
+  if (loading && !draft) {
+    return <StateNotice title={props.loading_message || "Loading configuration..."} />;
+  }
+
+  if (error) {
+    return <StateNotice kind="error" title={props.error_title || "Configuration unavailable"} message={error} />;
+  }
+
+  if (!draft) {
+    return <StateNotice title={props.empty_message || "No configuration is available for this record."} />;
+  }
+
+  return (
+    <section className="contract-flow-step-editor">
+      {!canAuthor ? (
+        <StateNotice kind="warning" title={props.read_only_message || "This session is read-only for this panel."} />
+      ) : null}
+
+      <div className="contract-flow-step-editor__grid">
+        {basicFields.map(renderField)}
+      </div>
+
+      {advancedFields.length > 0 ? (
+        <details className="contract-flow-step-editor__advanced">
+          <summary>{props.advanced_label || "Advanced"}</summary>
+          <div className="contract-flow-step-editor__grid contract-flow-step-editor__grid--advanced">
+            {advancedFields.map(renderField)}
+          </div>
+        </details>
+      ) : null}
+
+      <footer className="contract-flow-step-editor__footer">
+        <div className="contract-flow-step-editor__status" aria-live="polite">{status || ""}</div>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={save}
+          disabled={!canAuthor || saving}
+        >
+          {saving ? props.saving_label || "Saving..." : props.save_label || "Save changes"}
+        </button>
+      </footer>
+    </section>
+  );
+}
+
+export default ContractFlowStepEditor;
