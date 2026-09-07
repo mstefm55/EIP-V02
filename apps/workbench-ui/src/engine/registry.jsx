@@ -6,6 +6,7 @@ import ContractDetailEditor from "../components/primitives/ContractDetailEditor.
 import ContractTablePanel from "../components/primitives/ContractTablePanel.jsx";
 import ContractRecordEditor from "../components/primitives/ContractRecordEditor.jsx";
 import ContractMetricGrid from "../components/primitives/ContractMetricGrid.jsx";
+import ContractFlowStepEditor from "../components/primitives/ContractFlowStepEditor.jsx";
 import NoticePanel from "../components/primitives/NoticePanel.jsx";
 import SelectionDetailPanel from "../components/primitives/SelectionDetailPanel.jsx";
 import FlowStepNavigator from "../components/primitives/FlowStepNavigator.jsx";
@@ -45,6 +46,10 @@ const primitiveLibrary = Object.freeze({
   ContractMetricGrid: Object.freeze({
     component: ContractMetricGrid,
     contract: "contract_metric_grid_v1",
+  }),
+  ContractFlowStepEditor: Object.freeze({
+    component: ContractFlowStepEditor,
+    contract: "contract_flow_step_editor_v1",
   }),
   NoticePanel: Object.freeze({
     component: NoticePanel,
