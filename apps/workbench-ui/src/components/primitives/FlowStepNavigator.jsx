@@ -20,6 +20,7 @@ import {
   readSelectedFlowStepId,
   resolveInitialFlowStep,
 } from "./flowStepModel.js";
+import "./FlowStepNavigator.css";
 
 const ICONS = Object.freeze({
   check: Check,
@@ -43,14 +44,6 @@ const STATUS_ICONS = Object.freeze({
   skipped: CircleDashed,
   disabled: Circle,
 });
-
-function readPath(source, path) {
-  if (!source || !path) return undefined;
-  return String(path)
-    .split(".")
-    .filter(Boolean)
-    .reduce((cursor, key) => (cursor && cursor[key] !== undefined ? cursor[key] : undefined), source);
-}
 
 function buildResolveScopes(ctx) {
   return {
