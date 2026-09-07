@@ -28,6 +28,7 @@ class ConnectionProfileError extends Error {
     this.code = code;
     this.status = status;
     this.details = Array.isArray(details) ? details : [];
+    this.errors = this.details;
   }
 }
 
@@ -42,6 +43,7 @@ function bool(value, fallback = false) {
 }
 
 function boundedNumber(value, fallback, min, max) {
+  if (value === null || value === undefined || value === "") return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
@@ -108,6 +110,16 @@ function normalizeHeaders(value) {
   return output;
 }
 
+function readNested(source, previous, path, fallback = "") {
+  const parts = path.split(".");
+  let current = source;
+  for (const part of parts) current = current && typeof current === "object" ? current[part] : undefined;
+  if (current !== undefined && current !== null) return current;
+  current = previous;
+  for (const part of parts) current = current && typeof current === "object" ? current[part] : undefined;
+  return current !== undefined && current !== null ? current : fallback;
+}
+
 function normalizeProfile(input, existing = null) {
   const source = sanitizeJson(input) || {};
   const previous = existing && typeof existing === "object" ? existing : {};
@@ -125,103 +137,163 @@ function normalizeProfile(input, existing = null) {
   const routingSource = source.routing && typeof source.routing === "object" ? source.routing : {};
   const auditSource = source.audit && typeof source.audit === "object" ? source.audit : {};
 
+  const previousInbound = previous.inbound || {};
+  const previousVerification = previous.verification || {};
+  const previousIdempotency = previous.idempotency || {};
+  const previousOutbound = previous.outbound || {};
+  const previousOutboundAuth = previousOutbound.auth || {};
+  const previousRouting = previous.routing || {};
+  const previousAudit = previous.audit || {};
+
   return {
     profile_version: 1,
     identity: {
-      connection_name: text(identitySource.connection_name || previousIdentity.connection_name),
+      connection_name: text(identitySource.connection_name ?? previousIdentity.connection_name),
       connection_code: connectionCode,
-      connection_kind: text(identitySource.connection_kind || previousIdentity.connection_kind),
-      direction: text(identitySource.direction || previousIdentity.direction),
-      environment: text(identitySource.environment || previousIdentity.environment),
-      frontend_url: text(identitySource.frontend_url || previousIdentity.frontend_url),
-      portal_url: text(identitySource.portal_url || previousIdentity.portal_url),
+      connection_kind: text(identitySource.connection_kind ?? previousIdentity.connection_kind),
+      direction: text(identitySource.direction ?? previousIdentity.direction),
+      environment: text(identitySource.environment ?? previousIdentity.environment),
+      frontend_url: text(identitySource.frontend_url ?? previousIdentity.frontend_url),
+      portal_url: text(identitySource.portal_url ?? previousIdentity.portal_url),
       is_enabled: bool(
         identitySource.is_enabled,
-        previousIdentity.is_enabled !== undefined ? previousIdentity.is_enabled === true : true
+        previousIdentity.is_enabled !== undefined ? previousIdentity.is_enabled === true : false
       ),
     },
     inbound: {
-      inbound_path_suffix: text(inboundSource.inbound_path_suffix),
-      webhook_enabled: bool(inboundSource.webhook_enabled, false),
-      http_method: text(inboundSource.http_method || "POST").toUpperCase(),
-      expected_content_type: text(inboundSource.expected_content_type || "application/json"),
-      origin_allowlist: normalizeStringArray(inboundSource.origin_allowlist, 100, 500),
-      raw_body_required: bool(inboundSource.raw_body_required, true),
+      inbound_path_suffix: text(inboundSource.inbound_path_suffix ?? previousInbound.inbound_path_suffix),
+      webhook_enabled: bool(
+        inboundSource.webhook_enabled,
+        previousInbound.webhook_enabled === true
+      ),
+      http_method: text(inboundSource.http_method ?? previousInbound.http_method).toUpperCase(),
+      expected_content_type: text(inboundSource.expected_content_type ?? previousInbound.expected_content_type),
+      origin_allowlist: normalizeStringArray(
+        inboundSource.origin_allowlist ?? previousInbound.origin_allowlist,
+        100,
+        500
+      ),
+      raw_body_required: bool(
+        inboundSource.raw_body_required,
+        previousInbound.raw_body_required === true
+      ),
       rate_limit: {
-        max: boundedNumber(inboundSource.rate_limit?.max, 3000, 1, 1_000_000),
-        window_sec: boundedNumber(inboundSource.rate_limit?.window_sec, 3600, 1, 86_400),
+        max: boundedNumber(
+          inboundSource.rate_limit?.max ?? previousInbound.rate_limit?.max,
+          null,
+          1,
+          1_000_000
+        ),
+        window_sec: boundedNumber(
+          inboundSource.rate_limit?.window_sec ?? previousInbound.rate_limit?.window_sec,
+          null,
+          1,
+          86_400
+        ),
       },
     },
     verification: {
-      mode: text(verificationSource.mode || "none"),
-      allow_unverified: bool(verificationSource.allow_unverified, false),
+      mode: text(verificationSource.mode ?? previousVerification.mode),
+      allow_unverified: bool(
+        verificationSource.allow_unverified,
+        previousVerification.allow_unverified === true
+      ),
       api_key: {
-        header_name: text(verificationSource.api_key?.header_name || "X-API-Key"),
+        header_name: text(verificationSource.api_key?.header_name ?? previousVerification.api_key?.header_name),
       },
       hmac_signature: {
-        header_name: text(verificationSource.hmac_signature?.header_name),
-        algorithm: text(verificationSource.hmac_signature?.algorithm || "sha256"),
-        encoding: text(verificationSource.hmac_signature?.encoding || "hex"),
-        payload_mode: text(verificationSource.hmac_signature?.payload_mode || "raw"),
-        timestamp_header: text(verificationSource.hmac_signature?.timestamp_header || "x-timestamp"),
-        max_skew_sec: boundedNumber(verificationSource.hmac_signature?.max_skew_sec, 300, 0, 3600),
+        header_name: text(verificationSource.hmac_signature?.header_name ?? previousVerification.hmac_signature?.header_name),
+        algorithm: text(verificationSource.hmac_signature?.algorithm ?? previousVerification.hmac_signature?.algorithm),
+        encoding: text(verificationSource.hmac_signature?.encoding ?? previousVerification.hmac_signature?.encoding),
+        payload_mode: text(verificationSource.hmac_signature?.payload_mode ?? previousVerification.hmac_signature?.payload_mode),
+        timestamp_header: text(verificationSource.hmac_signature?.timestamp_header ?? previousVerification.hmac_signature?.timestamp_header),
+        max_skew_sec: boundedNumber(
+          verificationSource.hmac_signature?.max_skew_sec ?? previousVerification.hmac_signature?.max_skew_sec,
+          null,
+          0,
+          3600
+        ),
       },
       oauth2_jwt: {
-        header_name: text(verificationSource.oauth2_jwt?.header_name || "Authorization"),
-        token_prefix: text(verificationSource.oauth2_jwt?.token_prefix || "Bearer"),
-        issuer: text(verificationSource.oauth2_jwt?.issuer),
-        audience: text(verificationSource.oauth2_jwt?.audience),
-        jwks_url: text(verificationSource.oauth2_jwt?.jwks_url),
-        max_skew_sec: boundedNumber(verificationSource.oauth2_jwt?.max_skew_sec, 300, 0, 3600),
-        max_age_sec: boundedNumber(verificationSource.oauth2_jwt?.max_age_sec, 900, 1, 86_400),
+        header_name: text(verificationSource.oauth2_jwt?.header_name ?? previousVerification.oauth2_jwt?.header_name),
+        token_prefix: text(verificationSource.oauth2_jwt?.token_prefix ?? previousVerification.oauth2_jwt?.token_prefix),
+        issuer: text(verificationSource.oauth2_jwt?.issuer ?? previousVerification.oauth2_jwt?.issuer),
+        audience: text(verificationSource.oauth2_jwt?.audience ?? previousVerification.oauth2_jwt?.audience),
+        jwks_url: text(verificationSource.oauth2_jwt?.jwks_url ?? previousVerification.oauth2_jwt?.jwks_url),
+        max_skew_sec: boundedNumber(
+          verificationSource.oauth2_jwt?.max_skew_sec ?? previousVerification.oauth2_jwt?.max_skew_sec,
+          null,
+          0,
+          3600
+        ),
+        max_age_sec: boundedNumber(
+          verificationSource.oauth2_jwt?.max_age_sec ?? previousVerification.oauth2_jwt?.max_age_sec,
+          null,
+          1,
+          86_400
+        ),
       },
     },
     idempotency: {
-      event_id_location: text(idempotencySource.event_id_location || "header"),
-      event_id_key: text(idempotencySource.event_id_key || "X-Event-Id"),
-      idempotency_scope: text(idempotencySource.idempotency_scope || "connection"),
+      event_id_location: text(idempotencySource.event_id_location ?? previousIdempotency.event_id_location),
+      event_id_key: text(idempotencySource.event_id_key ?? previousIdempotency.event_id_key),
+      idempotency_scope: text(idempotencySource.idempotency_scope ?? previousIdempotency.idempotency_scope),
     },
     outbound: {
-      base_url: text(outboundSource.base_url),
-      path_prefix: text(outboundSource.path_prefix || "/"),
-      auth_mode: text(outboundSource.auth_mode || "none"),
+      base_url: text(outboundSource.base_url ?? previousOutbound.base_url),
+      path_prefix: text(outboundSource.path_prefix ?? previousOutbound.path_prefix),
+      auth_mode: text(outboundSource.auth_mode ?? previousOutbound.auth_mode),
       auth: {
-        header_name: text(outboundAuthSource.header_name),
-        query_param_name: text(outboundAuthSource.query_param_name),
-        public_key_ref: text(outboundAuthSource.public_key_ref),
-        username: text(outboundAuthSource.username),
-        client_id: text(outboundAuthSource.client_id),
-        client_auth_method: text(outboundAuthSource.client_auth_method),
-        token_url: text(outboundAuthSource.token_url),
-        scope: text(outboundAuthSource.scope),
+        header_name: text(outboundAuthSource.header_name ?? previousOutboundAuth.header_name),
+        query_param_name: text(outboundAuthSource.query_param_name ?? previousOutboundAuth.query_param_name),
+        public_key_ref: text(outboundAuthSource.public_key_ref ?? previousOutboundAuth.public_key_ref),
+        username: text(outboundAuthSource.username ?? previousOutboundAuth.username),
+        client_id: text(outboundAuthSource.client_id ?? previousOutboundAuth.client_id),
+        client_auth_method: text(outboundAuthSource.client_auth_method ?? previousOutboundAuth.client_auth_method),
+        token_url: text(outboundAuthSource.token_url ?? previousOutboundAuth.token_url),
+        scope: text(outboundAuthSource.scope ?? previousOutboundAuth.scope),
       },
-      default_headers: normalizeHeaders(outboundSource.default_headers),
-      timeout_ms: boundedNumber(outboundSource.timeout_ms, 8000, 250, 30_000),
+      default_headers: normalizeHeaders(outboundSource.default_headers ?? previousOutbound.default_headers),
+      timeout_ms: boundedNumber(outboundSource.timeout_ms ?? previousOutbound.timeout_ms, null, 250, 30_000),
       retry_policy: {
-        max_retries: boundedNumber(outboundSource.retry_policy?.max_retries, 2, 0, 5),
-        backoff_ms: boundedNumber(outboundSource.retry_policy?.backoff_ms, 500, 50, 30_000),
+        max_retries: boundedNumber(
+          outboundSource.retry_policy?.max_retries ?? previousOutbound.retry_policy?.max_retries,
+          null,
+          0,
+          5
+        ),
+        backoff_ms: boundedNumber(
+          outboundSource.retry_policy?.backoff_ms ?? previousOutbound.retry_policy?.backoff_ms,
+          null,
+          50,
+          30_000
+        ),
       },
-      healthcheck_path: text(outboundSource.healthcheck_path || "/health"),
-      test_request_method: text(outboundSource.test_request_method || "GET").toUpperCase(),
+      healthcheck_path: text(outboundSource.healthcheck_path ?? previousOutbound.healthcheck_path),
+      test_request_method: text(outboundSource.test_request_method ?? previousOutbound.test_request_method).toUpperCase(),
     },
     routing: {
-      channel: text(routingSource.channel),
-      protocol: text(routingSource.protocol),
-      provider_code: text(routingSource.provider_code),
-      supported_message_types: normalizeStringArray(routingSource.supported_message_types, 100, 100),
-      schema_version: text(routingSource.schema_version || "v1"),
-      envelope_profile: text(routingSource.envelope_profile || "canonical_v1"),
-      mapping_mode: text(routingSource.mapping_mode || "passthrough"),
-      mapping: sanitizeJson(routingSource.mapping || {}),
+      channel: text(routingSource.channel ?? previousRouting.channel),
+      protocol: text(routingSource.protocol ?? previousRouting.protocol),
+      provider_code: text(routingSource.provider_code ?? previousRouting.provider_code),
+      supported_message_types: normalizeStringArray(
+        routingSource.supported_message_types ?? previousRouting.supported_message_types,
+        100,
+        100
+      ),
+      schema_version: text(routingSource.schema_version ?? previousRouting.schema_version),
+      envelope_profile: text(routingSource.envelope_profile ?? previousRouting.envelope_profile),
+      mapping_mode: text(routingSource.mapping_mode ?? previousRouting.mapping_mode),
+      mapping: sanitizeJson(routingSource.mapping ?? previousRouting.mapping ?? {}) || {},
     },
     audit: {
-      audit_record_type: text(auditSource.audit_record_type || "CONNECTION_AUDIT"),
-      redaction_policy: sanitizeJson(auditSource.redaction_policy || {}),
-      max_body_size: boundedNumber(auditSource.max_body_size, 262_144, 1024, 5_242_880),
-      ip_allowlist: normalizeStringArray(auditSource.ip_allowlist, 100, 100),
-      log_level: text(auditSource.log_level || "info"),
+      audit_record_type: text(auditSource.audit_record_type ?? previousAudit.audit_record_type),
+      redaction_policy: sanitizeJson(auditSource.redaction_policy ?? previousAudit.redaction_policy ?? {}) || {},
+      max_body_size: boundedNumber(auditSource.max_body_size ?? previousAudit.max_body_size, null, 1024, 5_242_880),
+      ip_allowlist: normalizeStringArray(auditSource.ip_allowlist ?? previousAudit.ip_allowlist, 100, 100),
+      log_level: text(auditSource.log_level ?? previousAudit.log_level),
     },
-    attrs: sanitizeJson(source.attrs || previous.attrs || {}) || {},
+    attrs: sanitizeJson(source.attrs ?? previous.attrs ?? {}) || {},
     health: previous.health && typeof previous.health === "object" ? sanitizeJson(previous.health) || {} : {},
     credential_status:
       previous.credential_status && typeof previous.credential_status === "object"
@@ -232,39 +304,51 @@ function normalizeProfile(input, existing = null) {
 
 function taxonomySet(taxonomy, code) {
   const values = Array.isArray(taxonomy?.[code]) ? taxonomy[code] : [];
-  return new Set(values.map((entry) => text(entry?.code ?? entry)));
+  return new Set(values.map((entry) => text(entry?.code ?? entry)).filter(Boolean));
 }
 
-function validateConnectionProfile(profile, taxonomy = {}) {
+function validateGovernedValue(errors, taxonomy, listCode, value, path, { required = false } = {}) {
+  const allowed = taxonomySet(taxonomy, listCode);
+  const normalized = text(value);
+  if (required && !normalized) {
+    errors.push({ path, code: "REQUIRED", message: `${path} is required.` });
+    return;
+  }
+  if (normalized && allowed.size > 0 && !allowed.has(normalized)) {
+    errors.push({
+      path,
+      code: "GOVERNED_VALUE_INVALID",
+      message: `${path} must use an active ${listCode} value.`,
+    });
+  }
+}
+
+function validateConnectionProfile(profile, taxonomy = {}, options = {}) {
   const errors = [];
   const add = (path, code, message) => errors.push({ path, code, message });
   const identity = profile?.identity || {};
+  const requireComplete = options.requireComplete ?? identity.is_enabled === true;
 
   if (!identity.connection_name) add("identity.connection_name", "REQUIRED", "Connection name is required.");
   if (!identity.connection_code) add("identity.connection_code", "REQUIRED", "Connection code is required.");
 
-  const governedChecks = [
-    ["CONNECTION_KIND", identity.connection_kind, "identity.connection_kind"],
-    ["CONNECTION_DIRECTION", identity.direction, "identity.direction"],
-    ["CONNECTION_ENVIRONMENT", identity.environment, "identity.environment"],
-    ["CONNECTION_VERIFICATION_MODE", profile?.verification?.mode, "verification.mode"],
-    ["CONNECTION_AUTH_MODE", profile?.outbound?.auth_mode, "outbound.auth_mode"],
-    ["CONNECTION_CHANNEL", profile?.routing?.channel, "routing.channel"],
-    ["CONNECTION_MAPPING_MODE", profile?.routing?.mapping_mode, "routing.mapping_mode"],
-    ["CONNECTION_HTTP_METHOD", profile?.inbound?.http_method, "inbound.http_method"],
-    ["CONNECTION_HTTP_METHOD", profile?.outbound?.test_request_method, "outbound.test_request_method"],
-    ["CONNECTION_LOG_LEVEL", profile?.audit?.log_level, "audit.log_level"],
-  ];
-
-  for (const [listCode, value, path] of governedChecks) {
-    const allowed = taxonomySet(taxonomy, listCode);
-    if (allowed.size > 0 && (!value || !allowed.has(value))) {
-      add(path, "GOVERNED_VALUE_INVALID", `${path} must use an active ${listCode} value.`);
-    }
-  }
+  validateGovernedValue(errors, taxonomy, "CONNECTION_KIND", identity.connection_kind, "identity.connection_kind", { required: true });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_DIRECTION", identity.direction, "identity.direction", { required: true });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_ENVIRONMENT", identity.environment, "identity.environment", { required: true });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_VERIFICATION_MODE", profile?.verification?.mode, "verification.mode", { required: requireComplete });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_AUTH_MODE", profile?.outbound?.auth_mode, "outbound.auth_mode", { required: requireComplete });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_CHANNEL", profile?.routing?.channel, "routing.channel", { required: requireComplete });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_MAPPING_MODE", profile?.routing?.mapping_mode, "routing.mapping_mode", { required: requireComplete });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_HTTP_METHOD", profile?.inbound?.http_method, "inbound.http_method", {
+    required: requireComplete && ["inbound", "both"].includes(identity.direction),
+  });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_HTTP_METHOD", profile?.outbound?.test_request_method, "outbound.test_request_method", {
+    required: requireComplete && ["outbound", "both"].includes(identity.direction),
+  });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_LOG_LEVEL", profile?.audit?.log_level, "audit.log_level", { required: requireComplete });
 
   if (["inbound", "both"].includes(identity.direction)) {
-    if (!profile?.inbound?.inbound_path_suffix) {
+    if (requireComplete && !profile?.inbound?.inbound_path_suffix) {
       add("inbound.inbound_path_suffix", "REQUIRED", "Inbound path suffix is required for inbound connections.");
     }
     if (identity.environment === "production" && profile?.verification?.mode === "none") {
@@ -283,20 +367,20 @@ function validateConnectionProfile(profile, taxonomy = {}) {
     }
   }
 
-  if (["outbound", "both"].includes(identity.direction) && !profile?.outbound?.base_url) {
+  if (requireComplete && ["outbound", "both"].includes(identity.direction) && !profile?.outbound?.base_url) {
     add("outbound.base_url", "REQUIRED", "Outbound base URL is required for outbound connections.");
   }
 
-  if (!profile?.idempotency?.event_id_location) {
+  if (requireComplete && !profile?.idempotency?.event_id_location) {
     add("idempotency.event_id_location", "REQUIRED", "Idempotency event location is required.");
   }
-  if (!profile?.idempotency?.event_id_key) {
+  if (requireComplete && !profile?.idempotency?.event_id_key) {
     add("idempotency.event_id_key", "REQUIRED", "Idempotency event key is required.");
   }
-  if (!profile?.routing?.schema_version) {
+  if (requireComplete && !profile?.routing?.schema_version) {
     add("routing.schema_version", "REQUIRED", "Routing schema version is required.");
   }
-  if (!profile?.routing?.envelope_profile) {
+  if (requireComplete && !profile?.routing?.envelope_profile) {
     add("routing.envelope_profile", "REQUIRED", "Routing envelope profile is required.");
   }
 
@@ -360,7 +444,7 @@ function summarizeProfile(profile) {
     is_enabled: profile.identity?.is_enabled === true,
     health_status: profile.health?.status || "unknown",
     last_successful_test_at: profile.health?.last_successful_test_at || null,
-    setting_status: profile.setting_status || "active",
+    setting_status: profile.setting_status || (profile.identity?.is_enabled === true ? "active" : "disabled"),
     updated_at: profile.updated_at || null,
   };
 }
@@ -401,11 +485,14 @@ async function getConnectionProfile(pool, tenantId, connectionCode) {
 
 async function createConnectionProfile(pool, tenantId, input, taxonomy) {
   const profile = normalizeProfile(input);
-  const errors = validateConnectionProfile(profile, taxonomy);
+  const errors = validateConnectionProfile(profile, taxonomy, {
+    requireComplete: profile.identity.is_enabled === true,
+  });
   if (errors.length) {
     throw new ConnectionProfileError("Connection profile validation failed.", "CONNECTION_PROFILE_INVALID", 400, errors);
   }
   const key = profileKey(profile.identity.connection_code);
+  const settingStatus = profile.identity.is_enabled === true ? "active" : "disabled";
 
   return withTenantTransaction(pool, tenantId, async (client) => {
     const result = await client.query(
@@ -413,11 +500,11 @@ async function createConnectionProfile(pool, tenantId, input, taxonomy) {
       INSERT INTO tenant.tenant_settings
         (tenant_setting_id, tenant_id, setting_key, setting_value, setting_status, created_at, updated_at)
       VALUES
-        ($1::uuid, $2::uuid, $3, $4::jsonb, 'active', now(), now())
+        ($1::uuid, $2::uuid, $3, $4::jsonb, $5, now(), now())
       ON CONFLICT (tenant_id, setting_key) DO NOTHING
       RETURNING tenant_setting_id, setting_key, setting_value, setting_status, created_at, updated_at
       `,
-      [crypto.randomUUID(), tenantId, key, JSON.stringify(profile)]
+      [crypto.randomUUID(), tenantId, key, JSON.stringify(profile), settingStatus]
     );
     if (result.rowCount !== 1) {
       throw new ConnectionProfileError("Connection code already exists.", "CONNECTION_ALREADY_EXISTS", 409);
@@ -454,7 +541,9 @@ async function updateConnectionProfile(pool, tenantId, connectionCode, input, ta
         400
       );
     }
-    const errors = validateConnectionProfile(merged, taxonomy);
+    const errors = validateConnectionProfile(merged, taxonomy, {
+      requireComplete: merged.identity.is_enabled === true,
+    });
     if (errors.length) {
       throw new ConnectionProfileError("Connection profile validation failed.", "CONNECTION_PROFILE_INVALID", 400, errors);
     }
