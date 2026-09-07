@@ -1,5 +1,5 @@
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
-const SENSITIVE_KEY_PATTERN = /(?:^|[_-])(secret|password|passwd|token|api[_-]?key|private[_-]?key|authorization|cookie)(?:$|[_-])/i;
+const SENSITIVE_KEY_PATTERN = /(?:^|[_-])(secret|password|passwd|token|api[_-]?key|private[_-]?key|authorization|cookie|ciphertext|auth[_-]?tag|iv|key[_-]?id)(?:$|[_-])/i;
 const SENSITIVE_COMPACT_KEYS = new Set([
   "secret",
   "password",
@@ -13,6 +13,13 @@ const SENSITIVE_COMPACT_KEYS = new Set([
   "accesstoken",
   "refreshtoken",
   "testtoken",
+  "ciphertext",
+  "ciphertextb64",
+  "authtag",
+  "authtagb64",
+  "iv",
+  "ivb64",
+  "keyid",
 ]);
 
 function text(value) {
