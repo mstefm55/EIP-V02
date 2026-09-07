@@ -2148,3 +2148,20 @@ tbody tr.active-row {
     grid-template-columns: 1fr;
   }
 }
+
+/* Owner/Admin governed unavailable navigation state */
+.owner-surface-button:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+.owner-surface-button:disabled:hover {
+  transform: none;
+}
+.owner-surface-disabled-note {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  color: var(--oa-text-muted);
+}

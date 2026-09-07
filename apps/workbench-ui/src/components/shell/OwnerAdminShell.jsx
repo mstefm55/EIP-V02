@@ -107,6 +107,8 @@ function buildSidebarEntries({ availableSurfaces, activeWorkbenchSurface }) {
       label: "Processes",
       iconAsset: activeAsset,
       iconComponent: GitBranch,
+      disabled: false,
+      hint: null,
     });
   }
 
@@ -119,6 +121,8 @@ function buildSidebarEntries({ availableSurfaces, activeWorkbenchSurface }) {
       iconAsset: resolveAsset(surface.asset_key),
       iconComponent: resolveNavIcon(surface.nav_icon, fallbackIcon),
       surfaceCode: surface.code,
+      disabled: surface.is_enabled === false,
+      hint: surface.nav_hint || null,
     });
   }
 
@@ -184,7 +188,10 @@ function OwnerAdminShell({
       ? UNIVERSAL_WORKBENCH_KEY
       : surfaceCode;
 
-  const headerTabs = useMemo(() => sidebarEntries.slice(0, 4), [sidebarEntries]);
+  const headerTabs = useMemo(
+    () => sidebarEntries.filter((entry) => !entry.disabled).slice(0, 4),
+    [sidebarEntries]
+  );
 
   const accountLabel = useMemo(() => {
     return account?.login || account?.email || theme.brandLabel;
@@ -272,7 +279,7 @@ function OwnerAdminShell({
   }
 
   function selectSidebar(entry) {
-    if (!entry) return;
+    if (!entry || entry.disabled) return;
     if (entry.kind === "workbench") {
       if (activeWorkbenchSurface?.code) {
         setSurfaceCode(activeWorkbenchSurface.code);
@@ -324,6 +331,8 @@ function OwnerAdminShell({
                 type="button"
                 className={active ? "owner-header-tab active" : "owner-header-tab"}
                 onClick={() => selectSidebar(entry)}
+                disabled={entry.disabled}
+                title={entry.hint || entry.label}
               >
                 {entry.label}
               </button>
@@ -407,7 +416,9 @@ function OwnerAdminShell({
                   }
                   className={active ? "owner-surface-button active" : "owner-surface-button"}
                   onClick={() => selectSidebar(entry)}
-                  title={entry.label}
+                  disabled={entry.disabled}
+                  aria-disabled={entry.disabled ? "true" : undefined}
+                  title={entry.disabled && entry.hint ? entry.label + " — " + entry.hint : entry.label}
                 >
                   {entry.iconComponent ? (
                     <span className="owner-surface-lucide-icon" aria-hidden="true">
@@ -427,6 +438,9 @@ function OwnerAdminShell({
                   {!navCollapsed ? (
                     <span className="owner-surface-meta">
                       <strong className="owner-surface-label">{entry.label}</strong>
+                      {entry.disabled ? (
+                        <small className="owner-surface-disabled-note">Unavailable</small>
+                      ) : null}
                     </span>
                   ) : null}
                 </button>

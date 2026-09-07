@@ -545,6 +545,12 @@ async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
         END AS is_default,
         COALESCE(nullif(attrs#>>'{surface_nav,asset_key}', ''), nullif(attrs->>'asset_key', '')) AS asset_key,
         nullif(attrs#>>'{surface_nav,icon}', '') AS nav_icon,
+        CASE
+          WHEN lower(COALESCE(attrs#>>'{surface_nav,enabled}', 'true')) IN ('0', 'false', 'no', 'off')
+            THEN false
+          ELSE true
+        END AS nav_enabled,
+        nullif(attrs#>>'{surface_nav,hint}', '') AS nav_hint,
         nullif(attrs->>'module', '') AS module,
         nullif(attrs->>'surface_kind', '') AS surface_kind,
         COALESCE(nullif(attrs->>'realm', ''), $1) AS realm,
@@ -572,6 +578,8 @@ async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
       is_default,
       asset_key,
       nav_icon,
+      nav_enabled,
+      nav_hint,
       module,
       surface_kind,
       realm,
@@ -592,6 +600,8 @@ async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
     is_default: row.is_default === true,
     asset_key: row.asset_key || null,
     nav_icon: row.nav_icon || null,
+    is_enabled: row.nav_enabled !== false,
+    nav_hint: row.nav_hint || null,
     module: row.module || null,
     surface_kind: row.surface_kind || null,
     realm: row.realm || resolvedRealm,
