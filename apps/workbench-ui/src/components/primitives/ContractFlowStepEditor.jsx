@@ -281,7 +281,8 @@ function ContractFlowStepEditor({ node, ctx }) {
             value={value}
             placeholder={field.placeholder}
             onChange={(event) => {
-              const nextValue = field.type === "number" ? Number(event.target.value) : event.target.value;
+              const rawValue = event.target.value;
+              const nextValue = field.type === "number" && rawValue !== "" ? Number(rawValue) : rawValue;
               patchDraft(field.key, nextValue);
             }}
             disabled={!canAuthor || saving}
