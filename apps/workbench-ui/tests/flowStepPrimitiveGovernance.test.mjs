@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const ROOT = new URL("../src/", import.meta.url);
+
+async function read(relativePath) {
+  return readFile(new URL(relativePath, ROOT), "utf8");
+}
+
+test("flow step primitives are allowlisted in the generic UI registry", async () => {
+  const registry = await read("engine/registry.jsx");
+  assert.match(registry, /FlowStepNavigator/);
+  assert.match(registry, /flow_step_navigator_v1/);
+  assert.match(registry, /FlowStepPanel/);
+  assert.match(registry, /flow_step_panel_v1/);
+});
+
+test("flow step primitives remain domain neutral", async () => {
+  const sources = [
+    await read("components/primitives/FlowStepNavigator.jsx"),
+    await read("components/primitives/FlowStepPanel.jsx"),
+    await read("components/primitives/flowStepModel.js"),
+  ].join("\n");
+
+  const forbiddenBusinessTokens = [
+    "paypal",
+    "checkout.com",
+    "checkout_com",
+    "sales_order",
+    "production_process",
+    "connection_kind",
+    "gateway/connections",
+  ];
+
+  for (const token of forbiddenBusinessTokens) {
+    assert.equal(
+      sources.toLowerCase().includes(token.toLowerCase()),
+      false,
+      `generic flow primitive must not own business token: ${token}`
+    );
+  }
+});
+
+test("flow step navigator delegates selection through the generic target model", async () => {
+  const navigator = await read("components/primitives/FlowStepNavigator.jsx");
+  const panel = await read("components/primitives/FlowStepPanel.jsx");
+
+  assert.match(navigator, /selection_target/);
+  assert.match(navigator, /selectTarget/);
+  assert.match(navigator, /getTarget/);
+  assert.match(panel, /selection_target/);
+  assert.match(panel, /getTarget/);
+});
