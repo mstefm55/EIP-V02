@@ -88,6 +88,23 @@ test("patching a step draft changes only configured field paths", () => {
   assert.equal(patched.attrs.preserved, "yes");
 });
 
+test("optional numeric fields remain blank and omit-empty does not invent zero", () => {
+  const fields = normalizeStepEditorFields([
+    { key: "timeout", path: "reliability.timeout_ms", type: "number", omit_empty: true },
+    { key: "retries", path: "reliability.retries", type: "number", omit_empty: true },
+  ]);
+  const draft = buildStepEditorDraft({ reliability: {} }, fields);
+  assert.equal(draft.timeout, "");
+  assert.equal(draft.retries, "");
+
+  const patched = patchRecordFromStepDraft(
+    { reliability: { preserved: true } },
+    { timeout: "", retries: "" },
+    fields
+  );
+  assert.deepEqual(patched, { reliability: { preserved: true } });
+});
+
 test("string-list fields round-trip arrays without frontend business parsing", () => {
   const fields = normalizeStepEditorFields([
     { key: "origins", path: "security.origins", type: "string_list" },
