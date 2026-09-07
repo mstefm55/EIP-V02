@@ -23,6 +23,11 @@ jobs:
       - name: Validate primitive Effect V1
         run: node scripts/validate_effect_primitive_v1.mjs
 
+      - name: Validate Owner Admin Console governance
+        run: |
+          node --test services/api/test/ownerAdminConsoleGovernance.test.mjs
+          node --test apps/workbench-ui/tests/ownerAdminParity.test.mjs
+
       - name: Validate security controls
         run: node scripts/validate_security_controls.mjs
 

@@ -48,6 +48,15 @@ function isCodeFile(relPath) {
   return codeExts.has(path.extname(relPath).toLowerCase());
 }
 
+function isTestFile(relPath) {
+  const normalized = relPath.split(path.sep).join('/').toLowerCase();
+  const base = path.basename(normalized);
+  return normalized.includes('/test/')
+    || normalized.includes('/tests/')
+    || base.includes('.test.')
+    || base.includes('.spec.');
+}
+
 const failures = [];
 
 for (const rel of requiredFiles) {
@@ -157,6 +166,11 @@ for (const abs of walk(root)) {
       failures.push({ file: rel, line: idx + 1, message: 'non-public env var referenced in client-facing path' });
     }
   });
+
+  // Test fixtures frequently use variables such as row/result to model database
+  // clients. Keep global auth/secret marker scanning above, but reserve the
+  // response-boundary raw-row heuristic for runtime/source code paths.
+  if (isTestFile(rel)) continue;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
