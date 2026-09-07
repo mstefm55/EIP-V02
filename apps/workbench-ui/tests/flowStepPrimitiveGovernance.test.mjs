@@ -16,6 +16,8 @@ test("flow step primitives are allowlisted in the generic UI registry", async ()
   assert.match(registry, /flow_step_panel_v1/);
   assert.match(registry, /ContractFlowStepEditor/);
   assert.match(registry, /contract_flow_step_editor_v1/);
+  assert.match(registry, /ContractActionPanel/);
+  assert.match(registry, /contract_action_panel_v1/);
 });
 
 test("flow step primitives remain domain neutral", async () => {
@@ -24,6 +26,7 @@ test("flow step primitives remain domain neutral", async () => {
     await read("components/primitives/FlowStepPanel.jsx"),
     await read("components/primitives/flowStepModel.js"),
     await read("components/primitives/ContractFlowStepEditor.jsx"),
+    await read("components/primitives/ContractActionPanel.jsx"),
     await read("components/primitives/contractStepEditorModel.js"),
   ].join("\n");
 
@@ -66,4 +69,16 @@ test("contract flow step editor uses governed contracts rather than embedded end
   assert.match(editor, /record_selection_target/);
   assert.equal(/\/api\/eip\//.test(editor), false);
   assert.equal(/fetch\s*\(/.test(editor), false);
+});
+
+test("contract action panel keeps action endpoints and payloads metadata-owned", async () => {
+  const panel = await read("components/primitives/ContractActionPanel.jsx");
+
+  assert.match(panel, /resolveContract/);
+  assert.match(panel, /path_params/);
+  assert.match(panel, /resolveValue/);
+  assert.match(panel, /record_selection_target/);
+  assert.match(panel, /permissions_any/);
+  assert.equal(/\/api\/eip\//.test(panel), false);
+  assert.equal(/fetch\s*\(/.test(panel), false);
 });
