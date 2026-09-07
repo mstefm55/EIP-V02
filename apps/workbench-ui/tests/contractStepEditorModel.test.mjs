@@ -15,17 +15,21 @@ test("normalizes bounded metadata-driven fields", () => {
     { key: "name", path: "identity.name", label: "Name", required: true },
     { key: "mode", path: "security.mode", type: "select", options: ["a", "b"] },
     { key: "secret", path: "security.secret", type: "password", advanced: true, omit_empty: true },
+    { key: "allowlist", path: "security.allowlist", type: "string_list", advanced: true },
+    { key: "mapping", path: "routing.mapping", type: "json_object", advanced: true },
     { key: "__proto__", path: "unsafe.value" },
     { key: "name", path: "duplicate.value" },
   ]);
 
-  assert.equal(fields.length, 3);
+  assert.equal(fields.length, 5);
   assert.equal(fields[0].path, "identity.name");
   assert.deepEqual(fields[1].options, [
     { value: "a", label: "a" },
     { value: "b", label: "b" },
   ]);
   assert.equal(fields[2].advanced, true);
+  assert.equal(fields[3].type, "string_list");
+  assert.equal(fields[4].type, "json_object");
 });
 
 test("safe nested path helpers preserve unrelated metadata", () => {
@@ -82,6 +86,49 @@ test("patching a step draft changes only configured field paths", () => {
   assert.equal(patched.reliability.timeout_ms, 2500);
   assert.equal(patched.reliability.retries, 2);
   assert.equal(patched.attrs.preserved, "yes");
+});
+
+test("string-list fields round-trip arrays without frontend business parsing", () => {
+  const fields = normalizeStepEditorFields([
+    { key: "origins", path: "security.origins", type: "string_list" },
+  ]);
+  const draft = buildStepEditorDraft(
+    { security: { origins: ["https://a.example", "https://b.example"] } },
+    fields
+  );
+  assert.equal(draft.origins, "https://a.example\nhttps://b.example");
+
+  const patched = patchRecordFromStepDraft(
+    { security: { preserved: true } },
+    { origins: "https://a.example\nhttps://b.example, https://a.example" },
+    fields
+  );
+  assert.deepEqual(patched.security.origins, ["https://a.example", "https://b.example"]);
+  assert.equal(patched.security.preserved, true);
+});
+
+test("json-object fields project formatted JSON and reject invalid/non-object values", () => {
+  const fields = normalizeStepEditorFields([
+    { key: "mapping", path: "routing.mapping", type: "json_object", label: "Mapping" },
+  ]);
+  const draft = buildStepEditorDraft({ routing: { mapping: { mode: "safe", version: 1 } } }, fields);
+  assert.match(draft.mapping, /"mode": "safe"/);
+
+  assert.deepEqual(validateStepEditorDraft({ mapping: "{bad" }, fields), [
+    { key: "mapping", message: "Mapping must be a JSON object." },
+  ]);
+  assert.deepEqual(validateStepEditorDraft({ mapping: "[]" }, fields), [
+    { key: "mapping", message: "Mapping must be a JSON object." },
+  ]);
+  assert.deepEqual(validateStepEditorDraft({ mapping: "{\"mode\":\"safe\"}" }, fields), []);
+
+  const patched = patchRecordFromStepDraft(
+    { routing: { preserved: true } },
+    { mapping: "{\"mode\":\"safe\",\"version\":2}" },
+    fields
+  );
+  assert.deepEqual(patched.routing.mapping, { mode: "safe", version: 2 });
+  assert.equal(patched.routing.preserved, true);
 });
 
 test("required validation catches blank fields while allowing optional fields", () => {
