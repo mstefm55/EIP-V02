@@ -1,4 +1,5 @@
 import { readSelectedFlowStepId } from "./flowStepModel.js";
+import "./FlowStepPanel.css";
 
 function normalizeText(value) {
   return String(value ?? "").trim();
