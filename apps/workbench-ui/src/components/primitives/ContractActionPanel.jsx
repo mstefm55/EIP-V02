@@ -21,6 +21,10 @@ function hasAnyPermission(session, expected = []) {
   return expected.some((permission) => granted.includes(permission));
 }
 
+function isMultilineField(type) {
+  return ["textarea", "string_list", "json_object"].includes(type);
+}
+
 function buildContractContext(ctx) {
   return {
     surfaceProps: ctx?.surfaceProps || {},
@@ -297,7 +301,7 @@ function ContractActionPanel({ node, ctx }) {
         <span className="contract-action-panel__field-label">
           {field.label}{field.required ? " *" : ""}
         </span>
-        {field.type === "textarea" ? (
+        {isMultilineField(field.type) ? (
           <textarea
             rows={field.rows}
             value={value}
