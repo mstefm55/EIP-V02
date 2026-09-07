@@ -82,8 +82,21 @@ WHERE tenant_id IS NULL
   AND code = 'owner_connections'
   AND tree #>> '{props,composition}' = 'connection_setup_v1';
 
-IF NOT FOUND THEN
-  RAISE EXCEPTION 'v2_0044 could not enable owner_connections';
-END IF;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM eip_core.ui_surface
+    WHERE tenant_id IS NULL
+      AND version = 1
+      AND code = 'owner_connections'
+      AND tree #>> '{props,composition}' = 'connection_setup_v1'
+      AND attrs #>> '{surface_nav,enabled}' = 'true'
+      AND attrs ->> 'source' = 'v2_0044'
+  ) THEN
+    RAISE EXCEPTION 'v2_0044 could not enable owner_connections';
+  END IF;
+END
+$$;
 
 COMMIT;
