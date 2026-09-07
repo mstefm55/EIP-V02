@@ -67,7 +67,7 @@ edit("apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx", [
   {
     label: "sidebar disabled support",
     before: `                  className={active ? "owner-surface-button active" : "owner-surface-button"}\n                  onClick={() => selectSidebar(entry)}\n                  title={entry.label}\n                >`,
-    after: `                  className={active ? "owner-surface-button active" : "owner-surface-button"}\n                  onClick={() => selectSidebar(entry)}\n                  disabled={entry.disabled}\n                  aria-disabled={entry.disabled ? "true" : undefined}\n                  title={entry.disabled && entry.hint ? `${entry.label} — ${entry.hint}` : entry.label}\n                >`
+    after: `                  className={active ? "owner-surface-button active" : "owner-surface-button"}\n                  onClick={() => selectSidebar(entry)}\n                  disabled={entry.disabled}\n                  aria-disabled={entry.disabled ? "true" : undefined}\n                  title={entry.disabled && entry.hint ? entry.label + " — " + entry.hint : entry.label}\n                >`
   },
   {
     label: "sidebar unavailable label",
