@@ -70,6 +70,21 @@ jobs:
         continue-on-error: true
         run: '! grep -Eq "package.json|workbench.authenticated.smoke" pg.txt'
 
+      - name: Primitive component artifact contract
+        if: always()
+        continue-on-error: true
+        run: '! grep -Eq "ContractDetailEditor|SplitLayout|LoginPanel" pg.txt'
+
+      - name: Surface payload or Playwright artifact contract
+        if: always()
+        continue-on-error: true
+        run: '! grep -Eq "surfacePayload|playwright.config" pg.txt'
+
+      - name: Generic missing artifact contract
+        if: always()
+        continue-on-error: true
+        run: '! grep -Fq "missing required governance artifact" pg.txt'
+
       - name: Unclassified validator failure
         if: always()
         run: |
