@@ -9,6 +9,8 @@ const FIELD_TYPES = new Set([
   "password",
   "url",
   "email",
+  "string_list",
+  "json_object",
 ]);
 
 function normalizeText(value) {
@@ -85,7 +87,7 @@ export function normalizeStepEditorField(rawField) {
     advanced: rawField.advanced === true,
     placeholder: normalizeText(rawField.placeholder),
     help: normalizeText(rawField.help),
-    rows: Math.max(2, Math.min(12, Number(rawField.rows) || 4)),
+    rows: Math.max(2, Math.min(16, Number(rawField.rows) || 4)),
     options,
     options_path: optionsPath && safePathSegments(optionsPath) ? optionsPath : "",
     option_value_key: normalizeText(rawField.option_value_key || "code") || "code",
@@ -130,10 +132,53 @@ export function resolveStepEditorFieldOptions(field, optionsPayload) {
   return options.length > 0 ? options : field.options || [];
 }
 
+function normalizeStringList(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? "").split(/[\n,]+/);
+  const output = [];
+  const seen = new Set();
+  for (const entry of source) {
+    const text = normalizeText(entry);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    output.push(text);
+  }
+  return output;
+}
+
+function parseJsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, value };
+  }
+  const source = String(value ?? "").trim();
+  if (!source) return { ok: true, value: {} };
+  try {
+    const parsed = JSON.parse(source);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false, value: null };
+    }
+    return { ok: true, value: parsed };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
 function toDraftValue(field, rawValue) {
   // Secret/password inputs are write-only in the UI. Even if an unsafe backend
   // accidentally includes a value, never project it back into the form.
   if (field.type === "password") return "";
+
+  if (field.type === "string_list") {
+    const value = rawValue === undefined || rawValue === null ? field.default_value : rawValue;
+    return normalizeStringList(value).join("\n");
+  }
+
+  if (field.type === "json_object") {
+    const value = rawValue === undefined || rawValue === null ? field.default_value : rawValue;
+    const parsed = parseJsonObject(value);
+    return JSON.stringify(parsed.ok ? parsed.value : {}, null, 2);
+  }
 
   if (rawValue === undefined || rawValue === null) {
     if (field.type === "checkbox") return Boolean(field.default_value);
@@ -162,11 +207,19 @@ export function buildStepEditorDraft(record, fields) {
 export function validateStepEditorDraft(draft, fields) {
   const errors = [];
   for (const field of Array.isArray(fields) ? fields : []) {
-    if (!field.required) continue;
     const value = draft?.[field.key];
-    if (field.type === "checkbox") continue;
-    if (value === null || value === undefined || String(value).trim() === "") {
-      errors.push({ key: field.key, message: `${field.label} is required.` });
+    if (field.required && field.type !== "checkbox") {
+      if (value === null || value === undefined || String(value).trim() === "") {
+        errors.push({ key: field.key, message: `${field.label} is required.` });
+        continue;
+      }
+    }
+
+    if (field.type === "json_object" && value !== null && value !== undefined && String(value).trim() !== "") {
+      const parsed = parseJsonObject(value);
+      if (!parsed.ok) {
+        errors.push({ key: field.key, message: `${field.label} must be a JSON object.` });
+      }
     }
   }
   return errors;
@@ -187,9 +240,18 @@ export function patchRecordFromStepDraft(baseRecord, draft, fields, options = {}
       value = Number.isFinite(parsed) ? parsed : 0;
     } else if (field.type === "checkbox") {
       value = value === true;
+    } else if (field.type === "string_list") {
+      value = normalizeStringList(value);
+    } else if (field.type === "json_object") {
+      const parsed = parseJsonObject(value);
+      if (!parsed.ok) continue;
+      value = parsed.value;
     }
-    if (field.omit_empty && (value === null || value === undefined || String(value).trim() === "")) {
-      continue;
+    if (field.omit_empty) {
+      const isEmptyList = Array.isArray(value) && value.length === 0;
+      const isEmptyObject = value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0;
+      const isEmptyScalar = value === null || value === undefined || (typeof value !== "object" && String(value).trim() === "");
+      if (isEmptyList || isEmptyObject || isEmptyScalar) continue;
     }
     output = setSafePath(output, field.path, value);
   }
