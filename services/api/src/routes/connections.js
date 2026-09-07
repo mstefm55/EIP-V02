@@ -27,17 +27,10 @@ import {
   toConnectionSummaryDto,
 } from "../services/connections/connectionDto.js";
 
-const READ_PERMISSIONS = Object.freeze([
-  "OWNER_ADMIN_CONSOLE_READ",
-  "OWNER_ADMIN_SETTINGS_READ",
-  "OWNER_ADMIN_SECURITY_READ",
-]);
-const PROFILE_WRITE_PERMISSIONS = Object.freeze(["OWNER_ADMIN_SETTINGS_READ"]);
-const SECURITY_WRITE_PERMISSIONS = Object.freeze(["OWNER_ADMIN_SECURITY_READ"]);
-const TEST_PERMISSIONS = Object.freeze([
-  "OWNER_ADMIN_SECURITY_READ",
-  "OWNER_ADMIN_SETTINGS_READ",
-]);
+const READ_PERMISSIONS = Object.freeze(["OWNER_ADMIN_CONNECTION_READ"]);
+const PROFILE_WRITE_PERMISSIONS = Object.freeze(["OWNER_ADMIN_CONNECTION_WRITE"]);
+const SECURITY_WRITE_PERMISSIONS = Object.freeze(["OWNER_ADMIN_CONNECTION_SECRET_MANAGE"]);
+const TEST_PERMISSIONS = Object.freeze(["OWNER_ADMIN_CONNECTION_TEST"]);
 const SECRET_ASSURANCE = new Set(["otp", "totp"]);
 const DEFAULT_SECRET_STEP_UP_MIN = 10;
 
