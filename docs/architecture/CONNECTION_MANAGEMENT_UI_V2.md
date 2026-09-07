@@ -1,6 +1,6 @@
 # EIP Core V2 Connection Management UI Contract
 
-Status: implementation guardrail for the V1 -> V2 Connections migration.
+Status: implemented release guardrail for the V1 -> V2 Connections migration.
 
 Read with:
 
@@ -146,7 +146,7 @@ Preserve capability intent from V1 while rewriting the presentation and ownershi
 
 ## 6. Generic primitive composition
 
-The connection surface should be expressible predominantly through generic UI primitives:
+The connection surface is expressed predominantly through generic UI primitives:
 
 ```text
 SurfaceRoot
@@ -159,19 +159,20 @@ SurfaceRoot
                  selection target = connection_setup_step
             -> step content stack
                  -> FlowStepPanel step_id = identity
-                      -> generic contract-backed editor
+                      -> ContractFlowStepEditor
                  -> FlowStepPanel step_id = endpoint
-                      -> generic contract-backed editor
+                      -> ContractFlowStepEditor
                  -> FlowStepPanel step_id = security
-                      -> generic contract-backed editor
+                      -> ContractFlowStepEditor
+                      -> ContractActionPanel
                  -> ...
 ```
 
-`FlowStepNavigator` and `FlowStepPanel` are generic primitives and must remain domain-neutral.
+`FlowStepNavigator`, `FlowStepPanel`, `ContractFlowStepEditor` and `ContractActionPanel` are generic primitives and must remain domain-neutral.
 
 ## 7. Selection rules
 
-Suggested targets:
+Canonical targets:
 
 ```text
 connection
@@ -180,11 +181,11 @@ connection_setup_step
 
 Selection is UI coordination state only.
 
-Selecting a connection may reset the setup-step selection to the metadata-defined default step. Selecting a step must not authorize a write. Server permissions and connection lifecycle rules remain authoritative.
+Selecting a connection resets the setup-step selection to the metadata-defined default step. Selecting a step must not authorize a write. Server permissions and connection lifecycle rules remain authoritative.
 
 ## 8. Metadata example
 
-The eventual governed surface metadata may resemble:
+The governed surface metadata includes the canonical setup journey in this form:
 
 ```json
 {
@@ -192,9 +193,10 @@ The eventual governed surface metadata may resemble:
   "props": {
     "selection_target": "connection_setup_step",
     "default_step_id": "identity",
+    "reset_on_selection_target": "connection",
     "steps": [
       {"id": "identity", "label": "Identity", "icon": "identity"},
-      {"id": "endpoint", "label": "Endpoint", "icon": "network"},
+      {"id": "endpoint", "label": "Endpoint", "icon": "endpoint"},
       {"id": "security", "label": "Security", "icon": "security"},
       {"id": "reliability", "label": "Reliability", "icon": "reliability"},
       {"id": "routing", "label": "Routing & Mapping", "icon": "routing"},
@@ -205,13 +207,13 @@ The eventual governed surface metadata may resemble:
 }
 ```
 
-This example documents intended surface composition only. It is not a substitute for the missing governed V2 connection-profile contract and must not be activated in production until that backend boundary is restored.
+The production composition is seeded by `v2_0043_connection_management_surface_v1.sql` and is backed by the governed V2 connection contracts. Surface activation is a separate forward-only release action in `v2_0044_connection_management_surface_enable.sql`.
 
 ## 9. Progressive disclosure
 
-Each step editor should support a simple default section and an optional Advanced disclosure.
+Each step editor supports a simple default section and an optional Advanced disclosure.
 
-The basic layer should contain the fields necessary for the majority of configurations. Advanced fields may include cryptographic/provider parameters, raw mapping structures, diagnostic tuning or low-frequency controls only when exposed by the governed server contract.
+The basic layer contains the fields necessary for the majority of configurations. Advanced fields may include cryptographic/provider parameters, declarative mapping structures, diagnostic tuning or low-frequency controls only when exposed by the governed server contract.
 
 Do not hide required security information merely to simplify the screen. Simplicity comes from grouping and progressive disclosure, not from removing governed requirements.
 
@@ -245,43 +247,70 @@ Examples:
 
 ## 11. Add-new flow
 
-`New connection` remains supported.
+`New connection` is supported.
 
-Creation should open an empty governed draft/profile through the eventual V2 contract, select it into the generic `connection` selection target, and focus the metadata-defined first step.
+Creation opens an empty governed disabled draft/profile through the V2 contract, selects it into the generic `connection` selection target after creation, and focuses the metadata-defined first step.
 
-Do not generate tenant identity in the browser. Do not generate provider/business defaults that belong to governed metadata.
+The browser does not generate tenant identity. It also does not generate governed direction, auth mode, provider rules or other business/security defaults. Those remain server/metadata authority.
 
 ## 12. Security requirements
 
-The V2 surface must reuse existing EIP auth/session/CSRF transport and server-derived tenant scope.
+The V2 surface reuses existing EIP auth/session/CSRF transport and server-derived tenant scope.
 
 Never expose stored secrets in read payloads. The UI may receive bounded indicators such as:
 
 ```text
-secret_set: true
+configured: true
 credential_status: configured
+version: 3
+fingerprint: <non-secret fingerprint>
 ```
 
 but not stored secret material.
 
-Credential create/rotate/revoke/test actions must remain dedicated governed server actions and should retain step-up/permission requirements where the final V2 contract requires them.
+Credential rotate/revoke actions remain dedicated governed server actions with `OWNER_ADMIN_CONNECTION_SECRET_MANAGE` plus fresh OTP/TOTP step-up. Connection test uses `OWNER_ADMIN_CONNECTION_TEST`. Profile reads/writes use the dedicated connection read/write permissions. Tenant identity comes from the authenticated server session, never from browser payload authority.
 
 ## 13. Backend readiness gate
 
-Migration `v2_0039` intentionally keeps `owner_connections` disabled until governed gateway connection profiles are restored.
+Migration `v2_0039` historically kept `owner_connections` disabled while the real control plane was absent. That guard was intentionally retained until all readiness requirements were implemented and tested.
 
-Do not enable the production surface until all of the following are true:
+The release sequence is now:
+
+1. `v2_0040_connection_control_plane_foundation.sql`
+   - tenant-scoped connection profile persistence reuses governed `tenant.tenant_settings`;
+   - encrypted credential lifecycle is isolated in `tenant.connection_secret` with FORCE RLS;
+   - governed connection taxonomy is seeded.
+2. `v2_0041_connection_secret_actor_fk_hardening.sql`
+   - secret lifecycle actor references are hardened against tenant/identity drift.
+3. `v2_0042_connection_control_plane_permissions.sql`
+   - dedicated read/write/secret/test permissions are granted to existing eligible Owner Admin identities.
+4. API/service implementation
+   - bounded list/detail/create/update/test contracts;
+   - secret rotate/revoke lifecycle contracts;
+   - DTO redaction and safe credential status projection;
+   - server-derived tenant scope, CSRF, permission and step-up enforcement.
+5. `v2_0043_connection_management_surface_v1.sql`
+   - composes the real seven-step metadata-driven surface while keeping navigation disabled for validation.
+6. Governance validation
+   - API regression suite;
+   - Workbench unit suite and production build;
+   - dedicated Connections surface-governance tests;
+   - Owner Admin, security, tenant-scope and process-governance gates.
+7. `v2_0044_connection_management_surface_enable.sql`
+   - verifies the required control-plane/taxonomy/surface composition and only then enables the `owner_connections` navigation entry.
+
+The original readiness checklist is therefore satisfied:
 
 1. V2 connection profile persistence authority is explicit;
 2. DTO/redaction rules are explicit;
 3. tenant/owner-admin target scope is explicit;
 4. secret storage and response masking are explicit;
 5. list/detail/create/update/test contracts exist;
-6. credential lifecycle contracts exist where required;
+6. credential lifecycle contracts exist;
 7. permissions and step-up requirements are explicit;
-8. tenant-isolation tests cover the new routes;
+8. tenant-isolation/security tests cover the routes and storage boundary;
 9. UI surface metadata is backed by those contracts;
-10. `owner_connections` can be enabled truthfully through a forward migration.
+10. `owner_connections` is enabled through a separate forward migration after validation.
 
 ## 14. No-drift rule
 
@@ -296,21 +325,29 @@ When a V1 constant or branch is encountered, classify it before migration:
 
 Do not move a V1 hardcoded constant into a different React helper and call the migration complete.
 
+Provider-specific additions must arrive through governed metadata/profile packs and bounded server contracts. Do not add provider-specific branches to generic UI primitives.
+
 ## 15. Current implementation slice
 
-Implemented on the isolated UI branch:
+Implemented and release-gated on the isolated Connections branch:
 
-- generic `FlowStepNavigator` primitive;
-- bounded flow-step model;
-- generic selection-target integration;
-- automatic default-step selection;
+- tenant-scoped connection profile persistence authority;
+- encrypted independent connection credential lifecycle with FORCE RLS;
+- governed connection taxonomy;
+- dedicated Connection Management permissions;
+- server-derived tenant scope and CSRF enforcement;
+- fresh OTP/TOTP step-up for credential mutations;
+- secret-safe DTO/redaction boundary;
+- list/detail/create/update/test contracts;
+- credential rotate/revoke contracts;
+- generic `FlowStepNavigator` and bounded flow-step model;
+- generic selection-target integration and automatic default-step reset;
 - generic `FlowStepPanel` conditional detail primitive;
-- responsive visual treatment;
-- unit/governance tests.
+- generic `ContractFlowStepEditor` including bounded list/JSON field handling;
+- generic `ContractActionPanel` for governed server actions;
+- catalogue refresh/reselection support for current health/lifecycle projection;
+- metadata-driven seven-step `owner_connections` surface composition;
+- separate forward-only release enablement migration;
+- API, UI, build, security, tenant-scope, Owner Admin and process-governance regression coverage.
 
-Still blocked by backend readiness:
-
-- actual V2 connection profile contracts;
-- connection-specific surface metadata;
-- credential lifecycle wiring;
-- enabling `owner_connections`.
+There is no remaining backend-readiness blocker for the V2 Connections surface. Future provider-specific setup remains a metadata/profile-pack concern and must preserve the same ownership and security boundaries.
