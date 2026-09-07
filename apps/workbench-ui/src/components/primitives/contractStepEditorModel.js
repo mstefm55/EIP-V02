@@ -180,18 +180,19 @@ function toDraftValue(field, rawValue) {
     return JSON.stringify(parsed.ok ? parsed.value : {}, null, 2);
   }
 
-  if (rawValue === undefined || rawValue === null) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") {
     if (field.type === "checkbox") return Boolean(field.default_value);
     if (field.type === "number") {
+      if (field.default_value === undefined || field.default_value === null || field.default_value === "") return "";
       const numericDefault = Number(field.default_value);
-      return Number.isFinite(numericDefault) ? numericDefault : 0;
+      return Number.isFinite(numericDefault) ? numericDefault : "";
     }
     return field.default_value ?? "";
   }
   if (field.type === "checkbox") return rawValue === true;
   if (field.type === "number") {
     const parsed = Number(rawValue);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : "";
   }
   return String(rawValue);
 }
@@ -235,9 +236,19 @@ export function patchRecordFromStepDraft(baseRecord, draft, fields, options = {}
     if (!Object.prototype.hasOwnProperty.call(draft || {}, field.key)) continue;
     if (!isCreate && field.immutable_after_create) continue;
     let value = draft[field.key];
+
+    if (
+      field.omit_empty
+      && (value === null || value === undefined || (typeof value !== "object" && String(value).trim() === ""))
+    ) {
+      continue;
+    }
+
     if (field.type === "number") {
+      if (value === "" || value === null || value === undefined) continue;
       const parsed = Number(value);
-      value = Number.isFinite(parsed) ? parsed : 0;
+      if (!Number.isFinite(parsed)) continue;
+      value = parsed;
     } else if (field.type === "checkbox") {
       value = value === true;
     } else if (field.type === "string_list") {
