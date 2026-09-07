@@ -333,7 +333,7 @@ function validateConnectionProfile(profile, taxonomy = {}, options = {}) {
   if (!identity.connection_code) add("identity.connection_code", "REQUIRED", "Connection code is required.");
 
   validateGovernedValue(errors, taxonomy, "CONNECTION_KIND", identity.connection_kind, "identity.connection_kind", { required: true });
-  validateGovernedValue(errors, taxonomy, "CONNECTION_DIRECTION", identity.direction, "identity.direction", { required: true });
+  validateGovernedValue(errors, taxonomy, "CONNECTION_DIRECTION", identity.direction, "identity.direction", { required: requireComplete });
   validateGovernedValue(errors, taxonomy, "CONNECTION_ENVIRONMENT", identity.environment, "identity.environment", { required: true });
   validateGovernedValue(errors, taxonomy, "CONNECTION_VERIFICATION_MODE", profile?.verification?.mode, "verification.mode", { required: requireComplete });
   validateGovernedValue(errors, taxonomy, "CONNECTION_AUTH_MODE", profile?.outbound?.auth_mode, "outbound.auth_mode", { required: requireComplete });
