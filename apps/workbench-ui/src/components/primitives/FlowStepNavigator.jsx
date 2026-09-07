@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   Check,
   Circle,
@@ -79,6 +80,16 @@ function FlowStepNavigator({ node, ctx }) {
   const selectedId = readSelectedFlowStepId(selectedValue);
   const activeStep = resolveInitialFlowStep(steps, selectedId, props.default_step_id);
   const scopes = buildResolveScopes(ctx);
+
+  useEffect(() => {
+    if (!activeStep || activeStep.disabled) return;
+    if (selectedId === activeStep.id) return;
+    ctx?.selection?.selectTarget?.(selectionTarget, {
+      id: activeStep.id,
+      step_id: activeStep.id,
+      label: activeStep.label,
+    });
+  }, [activeStep?.id, activeStep?.label, activeStep?.disabled, selectedId, selectionTarget, ctx?.selection]);
 
   function selectStep(step) {
     if (!step || step.disabled) return;
