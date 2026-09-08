@@ -27,7 +27,7 @@ function resolvedProfile() {
         mode: "api_key",
         api_key: { header_name: "x-api-key" },
       },
-      routing: { channel: "website_intake" },
+      routing: { channel: "website_intake", mapping_mode: "mapped" },
       idempotency: {
         event_id_location: "header",
         event_id_key: "x-event-id",
@@ -47,7 +47,7 @@ async function buildApp(services) {
 }
 
 test("public inbound route returns a bounded duplicate response and suppresses further dispatch", async (t) => {
-  const claims = [];
+  const accepts = [];
   const app = await buildApp({
     resolvePublicConnection: async () => resolvedProfile(),
     assertInboundRequestAllowed: () => true,
@@ -56,12 +56,20 @@ test("public inbound route returns a bounded duplicate response and suppresses f
       mode: "api_key",
       assurance: "shared_secret",
     }),
-    claimInboundReceipt: async (input) => {
-      claims.push(input);
+    acceptInboundRequest: async (input) => {
+      accepts.push(input);
       return {
         duplicate: true,
-        receipt_id: "22222222-2222-4222-8222-222222222222",
-        accepted_at: "2026-09-08T19:00:00.000Z",
+        receipt: {
+          receipt_id: "22222222-2222-4222-8222-222222222222",
+          accepted_at: "2026-09-08T19:00:00.000Z",
+        },
+        dispatch: {
+          status: "PROCESS_STARTED",
+          service_object_id: "33333333-3333-4333-8333-333333333333",
+          process_instance_id: "44444444-4444-4444-8444-444444444444",
+          process_def_id: "55555555-5555-4555-8555-555555555555",
+        },
       };
     },
   });
@@ -84,12 +92,53 @@ test("public inbound route returns a bounded duplicate response and suppresses f
   assert.equal(body.accepted, true);
   assert.equal(body.duplicate, true);
   assert.equal(body.dispatch_status, "DUPLICATE_SUPPRESSED");
+  assert.equal(body.original_dispatch_status, "PROCESS_STARTED");
   assert.equal(body.receipt_id, "22222222-2222-4222-8222-222222222222");
-  assert.equal(claims.length, 1);
-  assert.equal(claims[0].tenantId, TENANT);
-  assert.equal(claims[0].profile.identity.connection_code, "orders_api");
-  assert.equal(claims[0].request.query.source, "test");
-  assert.equal(Buffer.isBuffer(claims[0].request.rawBody), true);
+  assert.equal(body.service_object_id, "33333333-3333-4333-8333-333333333333");
+  assert.equal(accepts.length, 1);
+  assert.equal(accepts[0].tenantId, TENANT);
+  assert.equal(accepts[0].profile.identity.connection_code, "orders_api");
+  assert.equal(accepts[0].request.query.source, "test");
+  assert.equal(Buffer.isBuffer(accepts[0].request.rawBody), true);
+});
+
+test("public inbound route returns bounded process dispatch evidence", async (t) => {
+  const app = await buildApp({
+    resolvePublicConnection: async () => resolvedProfile(),
+    assertInboundRequestAllowed: () => true,
+    verifyInboundRequest: async () => ({ verified: true, mode: "api_key", assurance: "shared_secret" }),
+    acceptInboundRequest: async () => ({
+      duplicate: false,
+      receipt: {
+        receipt_id: "22222222-2222-4222-8222-222222222222",
+        accepted_at: "2026-09-08T19:00:00.000Z",
+      },
+      dispatch: {
+        status: "PROCESS_STARTED",
+        service_object_id: "33333333-3333-4333-8333-333333333333",
+        process_instance_id: "44444444-4444-4444-8444-444444444444",
+        process_def_id: "55555555-5555-4555-8555-555555555555",
+      },
+    }),
+  });
+  t.after(() => app.close());
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/public/gateway/intake/TENANT_A/orders",
+    headers: {
+      "content-type": "application/json",
+      "x-event-id": "evt-2",
+    },
+    payload: JSON.stringify({ value: 7 }),
+  });
+
+  assert.equal(response.statusCode, 202);
+  const body = response.json();
+  assert.equal(body.dispatch_status, "PROCESS_STARTED");
+  assert.equal(body.service_object_id, "33333333-3333-4333-8333-333333333333");
+  assert.equal(body.process_instance_id, "44444444-4444-4444-8444-444444444444");
+  assert.equal(body.process_def_id, "55555555-5555-4555-8555-555555555555");
 });
 
 test("public inbound route returns 409 when an event ID is reused with a different payload", async (t) => {
@@ -101,7 +150,7 @@ test("public inbound route returns 409 when an event ID is reused with a differe
       mode: "hmac_signature",
       assurance: "signed_payload",
     }),
-    claimInboundReceipt: async () => {
+    acceptInboundRequest: async () => {
       throw new ConnectionInboundRuntimeError(
         "The inbound event ID was already used with a different payload.",
         "IDEMPOTENCY_CONFLICT",
