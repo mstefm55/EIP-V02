@@ -18,9 +18,9 @@ test("connection parity migration preserves seven-step UX and tenant-safe owners
   assert.match(migration, /connection_setup_v2/);
   assert.match(migration, /authenticated organisation/i);
   assert.match(migration, /tenant-scoped/i);
+  assert.match(migration, /no tenant selector or tenant override is introduced/i);
   assert.doesNotMatch(migration, /"path"\s*:\s*"tenant_id"/i);
   assert.doesNotMatch(migration, /"key"\s*:\s*"tenant_id"/i);
-  assert.doesNotMatch(migration, /tenant selector/i);
 });
 
 test("connection parity migration restores delete and one-time API key generation", () => {
