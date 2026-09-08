@@ -328,6 +328,9 @@ function validateConnectionProfile(profile, taxonomy = {}, options = {}) {
   const add = (path, code, message) => errors.push({ path, code, message });
   const identity = profile?.identity || {};
   const requireComplete = options.requireComplete ?? identity.is_enabled === true;
+  const direction = text(identity.direction).toLowerCase();
+  const inboundRequired = requireComplete && ["inbound", "both"].includes(direction);
+  const outboundRequired = requireComplete && ["outbound", "both"].includes(direction);
 
   if (!identity.connection_name) add("identity.connection_name", "REQUIRED", "Connection name is required.");
   if (!identity.connection_code) add("identity.connection_code", "REQUIRED", "Connection code is required.");
@@ -335,20 +338,57 @@ function validateConnectionProfile(profile, taxonomy = {}, options = {}) {
   validateGovernedValue(errors, taxonomy, "CONNECTION_KIND", identity.connection_kind, "identity.connection_kind", { required: true });
   validateGovernedValue(errors, taxonomy, "CONNECTION_DIRECTION", identity.direction, "identity.direction", { required: requireComplete });
   validateGovernedValue(errors, taxonomy, "CONNECTION_ENVIRONMENT", identity.environment, "identity.environment", { required: true });
-  validateGovernedValue(errors, taxonomy, "CONNECTION_VERIFICATION_MODE", profile?.verification?.mode, "verification.mode", { required: requireComplete });
-  validateGovernedValue(errors, taxonomy, "CONNECTION_AUTH_MODE", profile?.outbound?.auth_mode, "outbound.auth_mode", { required: requireComplete });
+
+  if (["inbound", "both"].includes(direction)) {
+    validateGovernedValue(
+      errors,
+      taxonomy,
+      "CONNECTION_VERIFICATION_MODE",
+      profile?.verification?.mode,
+      "verification.mode",
+      { required: inboundRequired }
+    );
+    validateGovernedValue(
+      errors,
+      taxonomy,
+      "CONNECTION_EVENT_ID_LOCATION",
+      profile?.idempotency?.event_id_location,
+      "idempotency.event_id_location",
+      { required: inboundRequired }
+    );
+    validateGovernedValue(
+      errors,
+      taxonomy,
+      "CONNECTION_IDEMPOTENCY_SCOPE",
+      profile?.idempotency?.idempotency_scope,
+      "idempotency.idempotency_scope",
+      { required: inboundRequired }
+    );
+  }
+
+  if (["outbound", "both"].includes(direction)) {
+    validateGovernedValue(
+      errors,
+      taxonomy,
+      "CONNECTION_AUTH_MODE",
+      profile?.outbound?.auth_mode,
+      "outbound.auth_mode",
+      { required: outboundRequired }
+    );
+  }
+
   validateGovernedValue(errors, taxonomy, "CONNECTION_CHANNEL", profile?.routing?.channel, "routing.channel", { required: requireComplete });
   validateGovernedValue(errors, taxonomy, "CONNECTION_MAPPING_MODE", profile?.routing?.mapping_mode, "routing.mapping_mode", { required: requireComplete });
   validateGovernedValue(errors, taxonomy, "CONNECTION_HTTP_METHOD", profile?.inbound?.http_method, "inbound.http_method", {
-    required: requireComplete && ["inbound", "both"].includes(identity.direction),
+    required: inboundRequired,
   });
   validateGovernedValue(errors, taxonomy, "CONNECTION_HTTP_METHOD", profile?.outbound?.test_request_method, "outbound.test_request_method", {
-    required: requireComplete && ["outbound", "both"].includes(identity.direction),
+    required: outboundRequired,
   });
   validateGovernedValue(errors, taxonomy, "CONNECTION_LOG_LEVEL", profile?.audit?.log_level, "audit.log_level", { required: requireComplete });
 
-  if (["inbound", "both"].includes(identity.direction)) {
-    if (requireComplete && !profile?.inbound?.inbound_path_suffix) {
+  if (["inbound", "both"].includes(direction)) {
+    if (inboundRequired && !profile?.inbound?.inbound_path_suffix) {
       add("inbound.inbound_path_suffix", "REQUIRED", "Inbound path suffix is required for inbound connections.");
     }
     if (identity.environment === "production" && profile?.verification?.mode === "none") {
@@ -365,18 +405,15 @@ function validateConnectionProfile(profile, taxonomy = {}, options = {}) {
         "Production inbound connections cannot allow unverified requests."
       );
     }
+    if (inboundRequired && !profile?.idempotency?.event_id_key) {
+      add("idempotency.event_id_key", "REQUIRED", "Idempotency event key is required for inbound connections.");
+    }
   }
 
-  if (requireComplete && ["outbound", "both"].includes(identity.direction) && !profile?.outbound?.base_url) {
+  if (outboundRequired && !profile?.outbound?.base_url) {
     add("outbound.base_url", "REQUIRED", "Outbound base URL is required for outbound connections.");
   }
 
-  if (requireComplete && !profile?.idempotency?.event_id_location) {
-    add("idempotency.event_id_location", "REQUIRED", "Idempotency event location is required.");
-  }
-  if (requireComplete && !profile?.idempotency?.event_id_key) {
-    add("idempotency.event_id_key", "REQUIRED", "Idempotency event key is required.");
-  }
   if (requireComplete && !profile?.routing?.schema_version) {
     add("routing.schema_version", "REQUIRED", "Routing schema version is required.");
   }
