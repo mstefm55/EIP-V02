@@ -31,5 +31,5 @@ test("live endpoint projection stays tenant-safe and contract-backed", () => {
 test("live endpoint projection removes stale pre-runtime messaging", () => {
   assert.doesNotMatch(surfacePayload, /public inbound gateway runtime is restored/i);
   assert.match(migration, /live transport support/i);
-  assert.match(surfacePayload, /Process\/Service Object bindings/);
+  assert.match(migration, /Process\/Service Object bindings/);
 });
