@@ -278,7 +278,11 @@ export default async function connectionRoutes(app, options = {}) {
           session.tenant_id,
           req.params.code,
           req.body || {},
-          taxonomy
+          taxonomy,
+          {
+            loadCredentialStatuses: (client, tenantId, connectionCode) =>
+              deps.listSecretStatuses(client, tenantId, connectionCode),
+          }
         );
         const secretStatus = await deps.withTenantTransaction(app.db, session.tenant_id, (client) =>
           deps.listSecretStatuses(client, session.tenant_id, req.params.code)
