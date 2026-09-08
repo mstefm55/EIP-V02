@@ -109,7 +109,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS info_record_connection_inbound_idempotency_uk
   WHERE record_type = 'connection_inbound_receipt'
     AND attrs ? 'idempotency_key_digest';
 
--- Upgrade Reliability from free-text location/scope inputs to governed selects.
+-- Upgrade Reliability to one explicit governed idempotency contract. Re-declare
+-- all three fields so this migration remains self-contained and drift-auditable.
 DO $$
 DECLARE
   fields jsonb;
@@ -132,10 +133,10 @@ $$;
 
 UPDATE eip_core.ui_surface
 SET tree = jsonb_set(
-      jsonb_set(
-        tree,
-        '{children,1,children,1,children,1,children,3,children,0,props,fields,0}',
-        $json$
+      tree,
+      '{children,1,children,1,children,1,children,3,children,0,props,fields}',
+      $json$
+      [
         {
           "key":"event_id_location",
           "path":"idempotency.event_id_location",
@@ -144,21 +145,24 @@ SET tree = jsonb_set(
           "options_path":"taxonomy.CONNECTION_EVENT_ID_LOCATION",
           "omit_empty":true,
           "help":"Choose where the external sender supplies its stable event identifier."
+        },
+        {
+          "key":"event_id_key",
+          "path":"idempotency.event_id_key",
+          "label":"Event ID key",
+          "omit_empty":true,
+          "help":"Header name, query parameter, or dot-separated JSON body path that contains the sender's stable event ID."
+        },
+        {
+          "key":"idempotency_scope",
+          "path":"idempotency.idempotency_scope",
+          "label":"Idempotency scope",
+          "type":"select",
+          "options_path":"taxonomy.CONNECTION_IDEMPOTENCY_SCOPE",
+          "omit_empty":true,
+          "help":"Connection scope isolates event IDs per connection; organisation scope shares them across this tenant."
         }
-        $json$::jsonb,
-        true
-      ),
-      '{children,1,children,1,children,1,children,3,children,0,props,fields,2}',
-      $json$
-      {
-        "key":"idempotency_scope",
-        "path":"idempotency.idempotency_scope",
-        "label":"Idempotency scope",
-        "type":"select",
-        "options_path":"taxonomy.CONNECTION_IDEMPOTENCY_SCOPE",
-        "omit_empty":true,
-        "help":"Connection scope isolates event IDs per connection; organisation scope shares them across this tenant."
-      }
+      ]
       $json$::jsonb,
       true
     ),
