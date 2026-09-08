@@ -1,10 +1,11 @@
 import {
+  SUPPORTED_INBOUND_VERIFICATION_MODES,
   buildConnectionActivationStatus,
   requiredInboundSecretKind,
   requiredOutboundSecretKind,
 } from "./connectionActivation.js";
 
-const LIVE_INBOUND_MODES = new Set(["none", "api_key", "hmac_signature"]);
+const LIVE_INBOUND_MODES = SUPPORTED_INBOUND_VERIFICATION_MODES;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -54,8 +55,11 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
     },
     {
       code: "VERIFICATION",
-      ok: Boolean(verificationMode) && !(environment === "production" && verificationMode === "none"),
-      message: "Inbound verification policy is configured for this environment.",
+      ok:
+        Boolean(verificationMode)
+        && LIVE_INBOUND_MODES.has(verificationMode)
+        && !(environment === "production" && verificationMode === "none"),
+      message: "Inbound verification uses a governed EIP connection verification mode.",
     },
     {
       code: "UNVERIFIED_POLICY",
@@ -80,11 +84,9 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
   const runtimeAvailable = configured && liveMode;
   const runtimeStatus = runtimeAvailable
     ? "AVAILABLE"
-    : verificationMode === "oauth2_jwt"
-      ? "OAUTH2_JWT_RUNTIME_PENDING"
-      : verificationMode && !liveMode
-        ? "VERIFICATION_MODE_UNSUPPORTED"
-        : "CONFIGURATION_INCOMPLETE";
+    : verificationMode && !liveMode
+      ? "VERIFICATION_MODE_UNSUPPORTED"
+      : "CONFIGURATION_INCOMPLETE";
 
   return {
     configured,
