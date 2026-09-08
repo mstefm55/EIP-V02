@@ -1,4 +1,9 @@
+import { validateInboundMappingConfig } from "./connectionInboundMapping.js";
+
 const SUPPORTED_INBOUND_VERIFICATION_MODES = new Set(["none", "api_key", "hmac_signature"]);
+const SUPPORTED_IDEMPOTENCY_LOCATIONS = new Set(["header", "query", "body"]);
+const SUPPORTED_IDEMPOTENCY_SCOPES = new Set(["connection", "tenant"]);
+const SUPPORTED_MAPPING_MODES = new Set(["passthrough", "mapped"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -46,12 +51,17 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
   const identity = profile?.identity || {};
   const inbound = profile?.inbound || {};
   const verification = profile?.verification || {};
+  const idempotency = profile?.idempotency || {};
+  const routing = profile?.routing || {};
   const outbound = profile?.outbound || {};
   const outboundAuth = outbound.auth || {};
   const direction = text(identity.direction).toLowerCase();
   const environment = text(identity.environment).toLowerCase();
   const verificationMode = text(verification.mode).toLowerCase();
   const outboundAuthMode = text(outbound.auth_mode).toLowerCase();
+  const eventLocation = text(idempotency.event_id_location).toLowerCase();
+  const idempotencyScope = text(idempotency.idempotency_scope).toLowerCase();
+  const mappingMode = text(routing.mapping_mode).toLowerCase();
 
   if (!["inbound", "outbound", "both"].includes(direction)) {
     add("identity.direction", "ACTIVATION_DIRECTION_REQUIRED", "Connection direction must be configured before activation.");
@@ -105,7 +115,25 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
       }
       if (text(verification.hmac_signature?.payload_mode).toLowerCase() === "timestamp_sha256"
         && !text(verification.hmac_signature?.timestamp_header)) {
-        add("verification.hmac_signature.timestamp_header", "ACTIVATION_HMAC_TIMESTAMP_REQUIRED", "Timestamp-based HMAC verification requires a timestamp header.");
+        add("verification.hmac_signature.timestamp_header", "ACTIVATION_HMAC_TIMESTAMP_REQUIRED", "Timestamp-based HMAC verification requires a timestamp header name.");
+      }
+    }
+
+    if (!SUPPORTED_IDEMPOTENCY_LOCATIONS.has(eventLocation)) {
+      add("idempotency.event_id_location", "ACTIVATION_IDEMPOTENCY_LOCATION_REQUIRED", "Inbound idempotency requires a governed event ID location.");
+    }
+    if (!text(idempotency.event_id_key)) {
+      add("idempotency.event_id_key", "ACTIVATION_IDEMPOTENCY_KEY_REQUIRED", "Inbound idempotency requires an event ID key/path.");
+    }
+    if (!SUPPORTED_IDEMPOTENCY_SCOPES.has(idempotencyScope)) {
+      add("idempotency.idempotency_scope", "ACTIVATION_IDEMPOTENCY_SCOPE_REQUIRED", "Inbound idempotency requires a governed scope.");
+    }
+    if (!SUPPORTED_MAPPING_MODES.has(mappingMode)) {
+      add("routing.mapping_mode", "ACTIVATION_MAPPING_MODE_REQUIRED", "Inbound routing requires a supported governed mapping mode.");
+    }
+    if (mappingMode === "mapped") {
+      for (const mappingIssue of validateInboundMappingConfig(profile, { requireMapped: true })) {
+        add(mappingIssue.path, `ACTIVATION_${mappingIssue.code}`, mappingIssue.message);
       }
     }
   }
@@ -159,7 +187,10 @@ function buildConnectionActivationStatus(profile, credentialStatuses = {}) {
 }
 
 export {
+  SUPPORTED_IDEMPOTENCY_LOCATIONS,
+  SUPPORTED_IDEMPOTENCY_SCOPES,
   SUPPORTED_INBOUND_VERIFICATION_MODES,
+  SUPPORTED_MAPPING_MODES,
   activeSecret,
   buildConnectionActivationStatus,
   requiredConnectionCredentialKinds,
