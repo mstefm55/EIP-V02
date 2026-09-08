@@ -204,14 +204,14 @@ export default async function publicConnectionRoutes(app, options = {}) {
   };
 
   app.route({
-    method: PUBLIC_METHODS,
+    method: [...PUBLIC_METHODS],
     url: "/api/public/gateway/intake/:tenantCode/:suffix",
     schema: { params: paramsSchema },
     handler: handleInbound,
   });
 
   app.route({
-    method: PUBLIC_METHODS,
+    method: [...PUBLIC_METHODS],
     url: "/api/edi/gateway/webhook/:tenantCode/:suffix",
     schema: { params: paramsSchema },
     handler: handleInbound,
