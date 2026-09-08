@@ -47,6 +47,18 @@ function resolveRecordIdentifier(record, recordKey) {
   return configuredValue ?? record.id ?? record.code ?? null;
 }
 
+function normalizeResultField(rawField, index) {
+  if (!rawField || typeof rawField !== "object" || Array.isArray(rawField)) return null;
+  const path = normalizeText(rawField.path || rawField.key);
+  if (!path) return null;
+  return {
+    path,
+    label: normalizeText(rawField.label || rawField.title || path) || `Result ${index + 1}`,
+    copyable: rawField.copyable === true,
+    sensitive: rawField.sensitive === true,
+  };
+}
+
 function normalizeAction(rawAction, index) {
   if (!rawAction || typeof rawAction !== "object" || Array.isArray(rawAction)) return null;
   const id = normalizeText(rawAction.id || `action_${index + 1}`);
@@ -66,8 +78,24 @@ function normalizeAction(rawAction, index) {
     confirm_message: normalizeText(rawAction.confirm_message),
     success_message: normalizeText(rawAction.success_message),
     error_message: normalizeText(rawAction.error_message),
+    result_notice: normalizeText(rawAction.result_notice),
+    result_fields: Array.isArray(rawAction.result_fields)
+      ? rawAction.result_fields.map(normalizeResultField).filter(Boolean).slice(0, 12)
+      : [],
+    clear_selection_target: normalizeText(rawAction.clear_selection_target).toLowerCase(),
     button_kind: normalizeText(rawAction.button_kind).toLowerCase() === "danger" ? "danger" : "primary",
   };
+}
+
+function displayResultValue(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  if (["number", "boolean", "bigint"].includes(typeof value)) return String(value);
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function ContractActionPanel({ node, ctx }) {
@@ -126,11 +154,15 @@ function ContractActionPanel({ node, ctx }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [runningActionId, setRunningActionId] = useState(null);
   const [status, setStatus] = useState(null);
+  const [actionResult, setActionResult] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   useEffect(() => {
     setDraft(buildStepEditorDraft(resolvedInitialValues, fields));
     setFieldErrors({});
     setStatus(null);
+    setActionResult(null);
+    setCopyStatus("");
   }, [fieldsKey, initialValuesKey, selectedRecordId]);
 
   const loadOptions = useCallback(async () => {
@@ -171,6 +203,8 @@ function ContractActionPanel({ node, ctx }) {
       return next;
     });
     setStatus(null);
+    setActionResult(null);
+    setCopyStatus("");
   }
 
   function buildScopes() {
@@ -207,6 +241,17 @@ function ContractActionPanel({ node, ctx }) {
     });
   }
 
+  async function copyResult(value) {
+    const text = displayResultValue(value);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy unavailable");
+    }
+  }
+
   const runAction = useCallback(async (action) => {
     if (!action || runningActionId) return;
     if (recordRequired && !selectedRecordId) {
@@ -241,14 +286,22 @@ function ContractActionPanel({ node, ctx }) {
 
     setRunningActionId(action.id);
     setStatus(null);
+    setActionResult(null);
+    setCopyStatus("");
     try {
       const payload = action.payload === undefined ? undefined : resolveValue(action.payload, scopes);
-      await apiFetch(resolved.pathWithQuery, {
+      const result = await apiFetch(resolved.pathWithQuery, {
         method: resolved.method,
         ...(payload === undefined ? {} : { body: payload }),
       });
       clearWriteOnlyFields();
+      if (action.result_fields.length > 0) {
+        setActionResult({ actionId: action.id, payload: result, fields: action.result_fields, notice: action.result_notice });
+      }
       setStatus(action.success_message || props.success_message || "Action completed.");
+      if (action.clear_selection_target) {
+        ctx?.selection?.clearTarget?.(action.clear_selection_target);
+      }
       ctx?.workbench?.refresh?.();
     } catch (err) {
       setStatus(describeApiError(err, action.error_message || props.error_message || "Action failed."));
@@ -258,8 +311,7 @@ function ContractActionPanel({ node, ctx }) {
   }, [
     contractCtx,
     ctx?.auth?.session,
-    ctx?.selection?.definition,
-    ctx?.selection?.targets,
+    ctx?.selection,
     ctx?.surfaceMeta,
     ctx?.surfaceProps,
     ctx?.workbench,
@@ -365,6 +417,29 @@ function ContractActionPanel({ node, ctx }) {
 
       {fields.length > 0 ? (
         <div className="contract-action-panel__grid">{fields.map(renderField)}</div>
+      ) : null}
+
+      {actionResult ? (
+        <div className="contract-action-panel__result" role="status">
+          {actionResult.notice ? <p className="contract-action-panel__result-notice">{actionResult.notice}</p> : null}
+          {actionResult.fields.map((field) => {
+            const value = getSafePath(actionResult.payload, field.path);
+            const displayValue = displayResultValue(value);
+            if (!displayValue) return null;
+            return (
+              <div key={`${actionResult.actionId}:${field.path}`} className="contract-action-panel__result-row">
+                <span>{field.label}</span>
+                <div className={field.sensitive ? "contract-action-panel__result-value contract-action-panel__result-value--sensitive" : "contract-action-panel__result-value"}>
+                  <code>{displayValue}</code>
+                  {field.copyable ? (
+                    <button type="button" className="secondary-button" onClick={() => copyResult(value)}>Copy</button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {copyStatus ? <small className="contract-action-panel__copy-status">{copyStatus}</small> : null}
+        </div>
       ) : null}
 
       <footer className="contract-action-panel__footer">
