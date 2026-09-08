@@ -1,9 +1,13 @@
 import {
+  SUPPORTED_IDEMPOTENCY_LOCATIONS,
+  SUPPORTED_IDEMPOTENCY_SCOPES,
   SUPPORTED_INBOUND_VERIFICATION_MODES,
+  SUPPORTED_MAPPING_MODES,
   buildConnectionActivationStatus,
   requiredInboundSecretKind,
   requiredOutboundSecretKind,
 } from "./connectionActivation.js";
+import { validateInboundMappingConfig } from "./connectionInboundMapping.js";
 
 const LIVE_INBOUND_MODES = SUPPORTED_INBOUND_VERIFICATION_MODES;
 
@@ -21,9 +25,17 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
   const identity = profile?.identity || {};
   const inbound = profile?.inbound || {};
   const verification = profile?.verification || {};
+  const idempotency = profile?.idempotency || {};
+  const routing = profile?.routing || {};
   const direction = text(identity.direction).toLowerCase();
   const environment = text(identity.environment).toLowerCase();
   const verificationMode = text(verification.mode).toLowerCase();
+  const eventLocation = text(idempotency.event_id_location).toLowerCase();
+  const idempotencyScope = text(idempotency.idempotency_scope).toLowerCase();
+  const mappingMode = text(routing.mapping_mode).toLowerCase();
+  const mappingErrors = mappingMode === "mapped"
+    ? validateInboundMappingConfig(profile, { requireMapped: true })
+    : [];
   const requiredSecretKind = requiredInboundSecretKind(profile);
   const activation = buildConnectionActivationStatus(profile, credentialStatuses);
 
@@ -77,6 +89,33 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
         ? `Required ${requiredSecretKind} credential is configured.`
         : "Verification mode does not require a stored symmetric connection credential.",
     },
+    {
+      code: "IDEMPOTENCY_LOCATION",
+      ok: SUPPORTED_IDEMPOTENCY_LOCATIONS.has(eventLocation),
+      message: "Inbound event ID location is configured.",
+    },
+    {
+      code: "IDEMPOTENCY_KEY",
+      ok: Boolean(text(idempotency.event_id_key)),
+      message: "Inbound event ID key/path is configured.",
+    },
+    {
+      code: "IDEMPOTENCY_SCOPE",
+      ok: SUPPORTED_IDEMPOTENCY_SCOPES.has(idempotencyScope),
+      message: "Inbound idempotency scope is configured.",
+    },
+    {
+      code: "MAPPING_MODE",
+      ok: SUPPORTED_MAPPING_MODES.has(mappingMode),
+      message: "Inbound mapping mode is configured.",
+    },
+    {
+      code: "MAPPING_CONFIGURATION",
+      ok: mappingMode !== "mapped" || mappingErrors.length === 0,
+      message: mappingMode === "mapped"
+        ? "Mapped dispatch has a bounded Service Object projection."
+        : "Passthrough mode is transport-only and does not start business processing.",
+    },
   ];
 
   const configured = checks.every((check) => check.ok);
@@ -94,10 +133,13 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
     activation_blockers: activation.blockers,
     runtime_available: runtimeAvailable,
     runtime_status: runtimeStatus,
+    business_dispatch_available: runtimeAvailable && mappingMode === "mapped" && mappingErrors.length === 0,
     direction,
     inbound_path_suffix: text(inbound.inbound_path_suffix) || null,
     verification_mode: verificationMode || null,
     required_secret_kind: requiredSecretKind,
+    mapping_mode: mappingMode || null,
+    mapping_errors: mappingErrors.slice(0, 20),
     checks,
   };
 }
