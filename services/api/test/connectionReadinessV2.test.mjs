@@ -14,12 +14,16 @@ function baseProfile() {
     },
     inbound: {
       inbound_path_suffix: "orders",
+      webhook_enabled: true,
       http_method: "POST",
       expected_content_type: "application/json",
     },
     verification: {
       mode: "api_key",
       allow_unverified: false,
+      api_key: {
+        header_name: "x-api-key",
+      },
     },
   };
 }
@@ -38,6 +42,7 @@ test("inbound readiness requires the governed credential for symmetric verificat
     api_key: { configured: true, status: "active" },
   });
   assert.equal(ready.configured, true);
+  assert.equal(ready.activation_ready, true);
   assert.equal(ready.runtime_available, false);
 });
 
