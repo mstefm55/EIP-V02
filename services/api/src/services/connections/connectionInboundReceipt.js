@@ -194,8 +194,22 @@ function safeVerificationProjection(verification = {}) {
   };
 }
 
-async function claimInboundReceipt({
-  pool,
+function safeDispatchProjection(dispatch = {}) {
+  if (!dispatch || typeof dispatch !== "object" || Array.isArray(dispatch)) return null;
+  const status = text(dispatch.status).toUpperCase();
+  if (!status) return null;
+  return {
+    status,
+    service_object_id: text(dispatch.service_object_id) || null,
+    process_instance_id: text(dispatch.process_instance_id) || null,
+    process_def_id: text(dispatch.process_def_id) || null,
+    reused: dispatch.reused === true,
+    recorded_at: text(dispatch.recorded_at) || null,
+  };
+}
+
+async function claimInboundReceiptWithClient({
+  client,
   tenantId,
   profile,
   request = {},
@@ -203,8 +217,11 @@ async function claimInboundReceipt({
   channel,
   correlationId,
   acceptedAt = new Date().toISOString(),
-  transaction = withTenantTransaction,
 }) {
+  if (!client || typeof client.query !== "function") {
+    throw new TypeError("Inbound receipt claim requires a tenant-scoped database client.");
+  }
+
   const connectionCode = text(profile?.identity?.connection_code).toLowerCase();
   const scope = normalizeIdempotencyScope(profile?.idempotency?.idempotency_scope);
   const event = extractInboundEventId(profile, request);
@@ -221,87 +238,164 @@ async function claimInboundReceipt({
   const payloadBytes = rawBody.length;
   const verificationProjection = safeVerificationProjection(verification);
 
-  return transaction(pool, tenantId, async (client) => {
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-      [keyDigest]
-    );
+  await client.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [keyDigest]
+  );
 
-    const existing = await client.query(
-      `
-      SELECT id, payload, attrs, created_at
-      FROM eip_core.info_record
-      WHERE tenant_id = $1::uuid
-        AND record_type = $2
-        AND attrs->>'idempotency_key_digest' = $3
-      ORDER BY created_at DESC
-      LIMIT 1
-      `,
-      [tenantId, RECEIPT_RECORD_TYPE, keyDigest]
-    );
+  const existing = await client.query(
+    `
+    SELECT id, payload, attrs, created_at
+    FROM eip_core.info_record
+    WHERE tenant_id = $1::uuid
+      AND record_type = $2
+      AND attrs->>'idempotency_key_digest' = $3
+    ORDER BY created_at DESC
+    LIMIT 1
+    `,
+    [tenantId, RECEIPT_RECORD_TYPE, keyDigest]
+  );
 
-    if (existing.rowCount > 0) {
-      const row = existing.rows[0];
-      const existingPayloadDigest = text(row?.payload?.payload_digest);
-      if (existingPayloadDigest && existingPayloadDigest !== payloadDigest) {
-        throw new ConnectionInboundRuntimeError(
-          "The inbound event ID was already used with a different payload.",
-          "IDEMPOTENCY_CONFLICT",
-          409
-        );
-      }
-      return {
-        duplicate: true,
-        receipt_id: row.id,
-        idempotency_scope: scope,
-        payload_digest: payloadDigest,
-        accepted_at: row.created_at || null,
-      };
+  if (existing.rowCount > 0) {
+    const row = existing.rows[0];
+    const existingPayloadDigest = text(row?.payload?.payload_digest);
+    if (existingPayloadDigest && existingPayloadDigest !== payloadDigest) {
+      throw new ConnectionInboundRuntimeError(
+        "The inbound event ID was already used with a different payload.",
+        "IDEMPOTENCY_CONFLICT",
+        409
+      );
     }
-
-    const payload = {
-      correlation_id: text(correlationId) || null,
-      connection_code: connectionCode || null,
-      channel: text(channel).toLowerCase() || null,
-      verification: verificationProjection,
-      payload_digest: payloadDigest,
-      payload_bytes: payloadBytes,
-      accepted_at: acceptedAt,
-    };
-    const attrs = {
-      transport_evidence: true,
-      idempotency_key_digest: keyDigest,
-      idempotency_scope: scope,
-      event_id_location: event.location,
-      configured_audit_record_type: text(profile?.audit?.audit_record_type) || null,
-    };
-
-    const inserted = await client.query(
-      `
-      INSERT INTO eip_core.info_record
-        (tenant_id, record_type, title, description, payload, attrs, created_by_agent_id)
-      VALUES
-        ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, NULL)
-      RETURNING id, created_at
-      `,
-      [
-        tenantId,
-        RECEIPT_RECORD_TYPE,
-        "Inbound connection receipt",
-        "Verified external transport receipt. Raw request body and credentials are not stored.",
-        JSON.stringify(payload),
-        JSON.stringify(attrs),
-      ]
-    );
-
     return {
-      duplicate: false,
-      receipt_id: inserted.rows[0]?.id || null,
+      duplicate: true,
+      receipt_id: row.id,
       idempotency_scope: scope,
       payload_digest: payloadDigest,
-      accepted_at: inserted.rows[0]?.created_at || acceptedAt,
+      accepted_at: row.created_at || null,
+      dispatch: safeDispatchProjection(row?.payload?.dispatch),
     };
-  });
+  }
+
+  const payload = {
+    correlation_id: text(correlationId) || null,
+    connection_code: connectionCode || null,
+    channel: text(channel).toLowerCase() || null,
+    verification: verificationProjection,
+    payload_digest: payloadDigest,
+    payload_bytes: payloadBytes,
+    accepted_at: acceptedAt,
+  };
+  const attrs = {
+    transport_evidence: true,
+    idempotency_key_digest: keyDigest,
+    idempotency_scope: scope,
+    event_id_location: event.location,
+    configured_audit_record_type: text(profile?.audit?.audit_record_type) || null,
+  };
+
+  const inserted = await client.query(
+    `
+    INSERT INTO eip_core.info_record
+      (tenant_id, record_type, title, description, payload, attrs, created_by_agent_id)
+    VALUES
+      ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, NULL)
+    RETURNING id, created_at
+    `,
+    [
+      tenantId,
+      RECEIPT_RECORD_TYPE,
+      "Inbound connection receipt",
+      "Verified external transport receipt. Raw request body and credentials are not stored.",
+      JSON.stringify(payload),
+      JSON.stringify(attrs),
+    ]
+  );
+
+  return {
+    duplicate: false,
+    receipt_id: inserted.rows[0]?.id || null,
+    idempotency_scope: scope,
+    payload_digest: payloadDigest,
+    accepted_at: inserted.rows[0]?.created_at || acceptedAt,
+    dispatch: null,
+  };
+}
+
+async function writeInboundDispatchEvidenceWithClient({
+  client,
+  tenantId,
+  receiptId,
+  dispatch,
+  recordedAt = new Date().toISOString(),
+}) {
+  if (!client || typeof client.query !== "function") {
+    throw new TypeError("Inbound dispatch evidence requires a tenant-scoped database client.");
+  }
+  const safeReceiptId = text(receiptId);
+  if (!safeReceiptId) {
+    throw new ConnectionInboundRuntimeError(
+      "Inbound receipt identity is required for dispatch evidence.",
+      "INBOUND_RECEIPT_REQUIRED",
+      500
+    );
+  }
+
+  const projection = safeDispatchProjection({ ...dispatch, recorded_at: recordedAt });
+  if (!projection) {
+    throw new ConnectionInboundRuntimeError(
+      "Inbound dispatch evidence is invalid.",
+      "INBOUND_DISPATCH_EVIDENCE_INVALID",
+      500
+    );
+  }
+
+  const result = await client.query(
+    `
+    UPDATE eip_core.info_record
+    SET payload = jsonb_set(
+          COALESCE(payload, '{}'::jsonb),
+          '{dispatch}',
+          $4::jsonb,
+          true
+        )
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+      AND record_type = $3
+    RETURNING id
+    `,
+    [tenantId, safeReceiptId, RECEIPT_RECORD_TYPE, JSON.stringify(projection)]
+  );
+  if (result.rowCount !== 1) {
+    throw new ConnectionInboundRuntimeError(
+      "Inbound receipt was not found while recording dispatch evidence.",
+      "INBOUND_RECEIPT_NOT_FOUND",
+      500
+    );
+  }
+  return projection;
+}
+
+async function claimInboundReceipt({
+  pool,
+  tenantId,
+  profile,
+  request = {},
+  verification = {},
+  channel,
+  correlationId,
+  acceptedAt = new Date().toISOString(),
+  transaction = withTenantTransaction,
+}) {
+  return transaction(pool, tenantId, (client) => claimInboundReceiptWithClient({
+    client,
+    tenantId,
+    profile,
+    request,
+    verification,
+    channel,
+    correlationId,
+    acceptedAt,
+  }));
 }
 
 export {
@@ -312,8 +406,11 @@ export {
   RECEIPT_RECORD_TYPE,
   buildIdempotencyKeyDigest,
   claimInboundReceipt,
+  claimInboundReceiptWithClient,
   extractInboundEventId,
   normalizeEventLocation,
   normalizeIdempotencyScope,
+  safeDispatchProjection,
   sha256Hex,
+  writeInboundDispatchEvidenceWithClient,
 };
