@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { withTenantTransaction } from "../../db/tenantTransaction.js";
+import { validateConnectionActivation } from "./connectionActivation.js";
 
 const PROFILE_KEY_PREFIX = "connection.profile.";
 const CONNECTION_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,63}$/;
@@ -522,14 +523,26 @@ async function getConnectionProfile(pool, tenantId, connectionCode) {
 
 async function createConnectionProfile(pool, tenantId, input, taxonomy) {
   const profile = normalizeProfile(input);
-  const errors = validateConnectionProfile(profile, taxonomy, {
-    requireComplete: profile.identity.is_enabled === true,
-  });
+  if (profile.identity.is_enabled === true) {
+    throw new ConnectionProfileError(
+      "New connections must be created as disabled drafts before activation.",
+      "CONNECTION_ACTIVATION_REQUIRES_DRAFT",
+      400,
+      [
+        {
+          path: "identity.is_enabled",
+          code: "ACTIVATION_REQUIRES_DRAFT",
+          message: "Create the connection as a disabled draft, configure credentials and readiness, then enable it.",
+        },
+      ]
+    );
+  }
+  const errors = validateConnectionProfile(profile, taxonomy, { requireComplete: false });
   if (errors.length) {
     throw new ConnectionProfileError("Connection profile validation failed.", "CONNECTION_PROFILE_INVALID", 400, errors);
   }
   const key = profileKey(profile.identity.connection_code);
-  const settingStatus = profile.identity.is_enabled === true ? "active" : "disabled";
+  const settingStatus = "disabled";
 
   return withTenantTransaction(pool, tenantId, async (client) => {
     const result = await client.query(
@@ -550,7 +563,7 @@ async function createConnectionProfile(pool, tenantId, input, taxonomy) {
   });
 }
 
-async function updateConnectionProfile(pool, tenantId, connectionCode, input, taxonomy) {
+async function updateConnectionProfile(pool, tenantId, connectionCode, input, taxonomy, options = {}) {
   const code = normalizeConnectionCode(connectionCode);
   const key = profileKey(code);
 
@@ -583,6 +596,26 @@ async function updateConnectionProfile(pool, tenantId, connectionCode, input, ta
     });
     if (errors.length) {
       throw new ConnectionProfileError("Connection profile validation failed.", "CONNECTION_PROFILE_INVALID", 400, errors);
+    }
+
+    if (merged.identity.is_enabled === true) {
+      if (typeof options.loadCredentialStatuses !== "function") {
+        throw new ConnectionProfileError(
+          "Connection activation readiness could not be verified.",
+          "CONNECTION_ACTIVATION_CHECK_UNAVAILABLE",
+          503
+        );
+      }
+      const credentialStatuses = await options.loadCredentialStatuses(client, tenantId, code);
+      const activationErrors = validateConnectionActivation(merged, credentialStatuses || {});
+      if (activationErrors.length > 0) {
+        throw new ConnectionProfileError(
+          "Connection activation is blocked until all governed readiness requirements pass.",
+          "CONNECTION_ACTIVATION_BLOCKED",
+          409,
+          activationErrors
+        );
+      }
     }
 
     const nextStatus = merged.identity.is_enabled === true ? "active" : "disabled";
