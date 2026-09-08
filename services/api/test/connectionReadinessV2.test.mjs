@@ -76,17 +76,17 @@ test("sandbox none mode is live only when unverified traffic is explicitly enabl
   assert.equal(ready.runtime_status, "AVAILABLE");
 });
 
-test("OAuth2 JWT readiness reports the verifier runtime as pending", () => {
+test("OAuth/JWT is not an inbound EIP authentication mode", () => {
   const profile = baseProfile();
   profile.verification.mode = "oauth2_jwt";
-  profile.verification.oauth2_jwt = {
-    issuer: "https://issuer.example",
-    audience: "eip",
-    jwks_url: "https://issuer.example/.well-known/jwks.json",
-  };
 
   const result = buildInboundReadiness(profile, {});
-  assert.equal(result.configured, true);
+  assert.equal(result.configured, false);
+  assert.equal(result.activation_ready, false);
   assert.equal(result.runtime_available, false);
-  assert.equal(result.runtime_status, "OAUTH2_JWT_RUNTIME_PENDING");
+  assert.equal(result.runtime_status, "VERIFICATION_MODE_UNSUPPORTED");
+  assert.equal(result.checks.find((check) => check.code === "VERIFICATION")?.ok, false);
+  assert.ok(
+    result.activation_blockers.some((entry) => entry.code === "ACTIVATION_VERIFICATION_UNSUPPORTED")
+  );
 });
