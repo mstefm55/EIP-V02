@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { sha256Hex } from "../../auth/crypto.js";
+import { requiredConnectionCredentialKinds } from "./connectionActivation.js";
 import { normalizeConnectionCode } from "./connectionProfile.js";
 
 const SECRET_KIND_PATTERN = /^[a-z][a-z0-9_:-]{1,63}$/;
@@ -142,7 +143,7 @@ async function assertGovernedSecretKind(client, secretKind) {
 async function assertConnectionExists(client, tenantId, connectionCode) {
   const result = await client.query(
     `
-    SELECT 1
+    SELECT setting_value, setting_status
     FROM tenant.tenant_settings
     WHERE tenant_id = $1::uuid
       AND setting_key = $2
@@ -154,6 +155,7 @@ async function assertConnectionExists(client, tenantId, connectionCode) {
   if (result.rowCount !== 1) {
     throw new ConnectionSecretError("Connection profile was not found.", "CONNECTION_NOT_FOUND", 404);
   }
+  return result.rows[0];
 }
 
 function publicSecretStatus(row) {
@@ -306,8 +308,21 @@ async function revokeSecret({ client, tenantId, connectionCode, secretKind, acto
   if (!client || typeof client.query !== "function") {
     throw new TypeError("Secret revocation requires an existing tenant transaction client.");
   }
-  await assertConnectionExists(client, tenantId, code);
+  const connectionRow = await assertConnectionExists(client, tenantId, code);
   await assertGovernedSecretKind(client, kind);
+
+  const profile = connectionRow?.setting_value && typeof connectionRow.setting_value === "object"
+    ? connectionRow.setting_value
+    : {};
+  const profileEnabled = profile?.identity?.is_enabled === true || connectionRow?.setting_status === "active";
+  const requiredKinds = requiredConnectionCredentialKinds(profile);
+  if (profileEnabled && requiredKinds.includes(kind)) {
+    throw new ConnectionSecretError(
+      "This credential is required by an enabled connection. Disable the connection before revoking it.",
+      "CONNECTION_SECRET_REQUIRED_BY_ACTIVE_PROFILE",
+      409
+    );
+  }
 
   const result = await client.query(
     `
