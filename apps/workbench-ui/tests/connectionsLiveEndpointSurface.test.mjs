@@ -11,17 +11,25 @@ const migration = fs.readFileSync(
   "utf8"
 );
 
+function jsonPayloadText(source) {
+  return Array.from(source.matchAll(/\$json\$\s*([\s\S]*?)\s*\$json\$/g))
+    .map((match) => match[1])
+    .join("\n");
+}
+
+const surfacePayload = jsonPayloadText(migration);
+
 test("live endpoint projection stays tenant-safe and contract-backed", () => {
   assert.match(migration, /connection_setup_v2/);
-  assert.match(migration, /\/api\/eip\/owner-admin\/connections\/:code\/endpoints/);
-  assert.match(migration, /OWNER_ADMIN_CONNECTION_READ/);
-  assert.match(migration, /Public intake URL/);
-  assert.match(migration, /EDI webhook URL/);
-  assert.doesNotMatch(migration, /"path"\s*:\s*"tenant_id"|"key"\s*:\s*"tenant_id"/i);
+  assert.match(surfacePayload, /\/api\/eip\/owner-admin\/connections\/:code\/endpoints/);
+  assert.match(surfacePayload, /OWNER_ADMIN_CONNECTION_READ/);
+  assert.match(surfacePayload, /Public intake URL/);
+  assert.match(surfacePayload, /EDI webhook URL/);
+  assert.doesNotMatch(surfacePayload, /"path"\s*:\s*"tenant_id"|"key"\s*:\s*"tenant_id"/i);
 });
 
 test("live endpoint projection removes stale pre-runtime messaging", () => {
-  assert.doesNotMatch(migration, /public inbound gateway runtime is restored/i);
+  assert.doesNotMatch(surfacePayload, /public inbound gateway runtime is restored/i);
   assert.match(migration, /live transport support/i);
-  assert.match(migration, /Process\/Service Object bindings/);
+  assert.match(surfacePayload, /Process\/Service Object bindings/);
 });
