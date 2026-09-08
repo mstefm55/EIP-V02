@@ -1,7 +1,9 @@
+import { withTenantTransaction } from "../db/tenantTransaction.js";
 import { getConnectionProfile } from "../services/connections/connectionProfile.js";
+import { listSecretStatuses } from "../services/connections/connectionSecretStore.js";
+import { buildInboundReadiness } from "../services/connections/connectionReadiness.js";
 
 const READ_PERMISSIONS = Object.freeze(["OWNER_ADMIN_CONNECTION_READ"]);
-const LIVE_INBOUND_MODES = new Set(["none", "api_key", "hmac_signature"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -26,7 +28,7 @@ function requestOrigin(req) {
   }
 }
 
-function buildEndpointProjection({ origin, tenantCode, profile }) {
+function buildEndpointProjection({ origin, tenantCode, profile, readiness = {} }) {
   const suffix = text(profile?.inbound?.inbound_path_suffix);
   const direction = text(profile?.identity?.direction).toLowerCase();
   const channel = text(profile?.routing?.channel).toLowerCase();
@@ -37,15 +39,15 @@ function buildEndpointProjection({ origin, tenantCode, profile }) {
   return {
     tenant_code: tenantCode,
     connection_code: profile?.identity?.connection_code || null,
+    connection_enabled: profile?.identity?.is_enabled === true,
+    inbound_enabled: profile?.inbound?.webhook_enabled === true,
     inbound_path_suffix: suffix || null,
     channel: channel || null,
     verification_mode: verificationMode || null,
-    runtime_available: inboundConfigured && LIVE_INBOUND_MODES.has(verificationMode),
-    runtime_status: LIVE_INBOUND_MODES.has(verificationMode)
-      ? "AVAILABLE"
-      : verificationMode === "oauth2_jwt"
-        ? "OAUTH2_JWT_RUNTIME_PENDING"
-        : "VERIFICATION_MODE_UNSUPPORTED",
+    configuration_ready: readiness?.configured === true,
+    activation_ready: readiness?.activation_ready === true,
+    runtime_available: readiness?.runtime_available === true,
+    runtime_status: readiness?.runtime_status || "CONFIGURATION_INCOMPLETE",
     public_intake_url:
       inboundConfigured && channel !== "edi" && base
         ? `${base}/api/public/gateway/intake/${encodeURIComponent(tenantCode)}/${encodeURIComponent(suffix)}`
@@ -59,7 +61,10 @@ function buildEndpointProjection({ origin, tenantCode, profile }) {
 
 export default async function connectionEndpointRoutes(app, options = {}) {
   const deps = {
+    withTenantTransaction,
     getConnectionProfile,
+    listSecretStatuses,
+    buildInboundReadiness,
     ...(options.services || {}),
   };
 
@@ -87,6 +92,14 @@ export default async function connectionEndpointRoutes(app, options = {}) {
         if (!profile || profile.setting_status === "deprecated") {
           return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
         }
+
+        const credentialStatuses = await deps.withTenantTransaction(
+          app.db,
+          session.tenant_id,
+          (client) => deps.listSecretStatuses(client, session.tenant_id, req.params.code)
+        );
+        const readiness = deps.buildInboundReadiness(profile, credentialStatuses);
+
         const tenantResult = await app.db.query(
           `
           SELECT tenant_code
@@ -100,10 +113,12 @@ export default async function connectionEndpointRoutes(app, options = {}) {
         if (tenantResult.rowCount !== 1) {
           return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
         }
+
         const endpoints = buildEndpointProjection({
           origin: requestOrigin(req),
           tenantCode: tenantResult.rows[0].tenant_code,
           profile,
+          readiness,
         });
         return reply.send({ ok: true, endpoints });
       } catch (error) {
@@ -117,4 +132,4 @@ export default async function connectionEndpointRoutes(app, options = {}) {
   );
 }
 
-export { LIVE_INBOUND_MODES, READ_PERMISSIONS, buildEndpointProjection, requestOrigin };
+export { READ_PERMISSIONS, buildEndpointProjection, requestOrigin };
