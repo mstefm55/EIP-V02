@@ -4,13 +4,15 @@ import {
   assertConnectionProfileInputSafe,
 } from "../src/services/connections/connectionInputPolicy.js";
 
-test("allows non-secret authentication metadata", () => {
+test("allows supported non-secret authentication metadata", () => {
   assert.equal(assertConnectionProfileInputSafe({
     verification: {
       api_key: { header_name: "X-API-Key" },
-      oauth2_jwt: {
-        token_prefix: "Bearer",
-        jwks_url: "https://example.com/.well-known/jwks.json",
+      hmac_signature: {
+        header_name: "X-Signature",
+        algorithm: "sha256",
+        encoding: "hex",
+        payload_mode: "raw",
       },
     },
     outbound: {
@@ -21,6 +23,20 @@ test("allows non-secret authentication metadata", () => {
       },
     },
   }), true);
+});
+
+test("rejects inbound OAuth/JWT verification metadata", () => {
+  assert.throws(
+    () => assertConnectionProfileInputSafe({
+      verification: {
+        oauth2_jwt: {
+          token_prefix: "Bearer",
+          jwks_url: "https://example.com/.well-known/jwks.json",
+        },
+      },
+    }),
+    (error) => error.code === "CONNECTION_INBOUND_AUTH_MODE_FORBIDDEN"
+  );
 });
 
 test("rejects nested secret values regardless of location", () => {
