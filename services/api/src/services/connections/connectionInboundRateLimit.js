@@ -1,57 +1,37 @@
 import { withTenantTransaction } from "../../db/tenantTransaction.js";
 import { ConnectionInboundRuntimeError } from "./connectionInboundRuntime.js";
-
-const RATE_LIMIT_MAX_REQUESTS = 1_000_000;
-const RATE_LIMIT_MAX_WINDOW_SEC = 86_400;
-const RATE_LIMIT_MIN_WINDOW_SEC = 1;
-const RATE_LIMIT_RETENTION_FLOOR_SEC = 3_600;
+import {
+  RATE_LIMIT_MAX_REQUESTS,
+  RATE_LIMIT_MAX_WINDOW_SEC,
+  RATE_LIMIT_MIN_WINDOW_SEC,
+  RATE_LIMIT_RETENTION_FLOOR_SEC,
+  inspectInboundRateLimit,
+} from "./connectionRateLimitPolicy.js";
 
 function text(value) {
   return String(value ?? "").trim();
 }
 
-function configuredNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
-
 function resolveInboundRateLimit(profile) {
-  const rateLimit = profile?.inbound?.rate_limit || {};
-  const maxRequests = configuredNumber(rateLimit.max);
-  const windowSec = configuredNumber(rateLimit.window_sec);
-  const hasMax = maxRequests !== null;
-  const hasWindow = windowSec !== null;
-
-  if (!hasMax && !hasWindow) {
+  const inspected = inspectInboundRateLimit(profile);
+  if (!inspected.configured) {
     return {
       enabled: false,
       max_requests: null,
       window_sec: null,
     };
   }
-
-  if (
-    !hasMax
-    || !hasWindow
-    || !Number.isInteger(maxRequests)
-    || !Number.isInteger(windowSec)
-    || maxRequests < 1
-    || maxRequests > RATE_LIMIT_MAX_REQUESTS
-    || windowSec < RATE_LIMIT_MIN_WINDOW_SEC
-    || windowSec > RATE_LIMIT_MAX_WINDOW_SEC
-  ) {
+  if (!inspected.valid) {
     throw new ConnectionInboundRuntimeError(
       "Configured inbound rate limit is incomplete or outside the bounded runtime contract.",
       "CONNECTION_RATE_LIMIT_CONFIG_INVALID",
       503
     );
   }
-
   return {
     enabled: true,
-    max_requests: maxRequests,
-    window_sec: windowSec,
+    max_requests: inspected.max_requests,
+    window_sec: inspected.window_sec,
   };
 }
 
