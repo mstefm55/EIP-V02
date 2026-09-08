@@ -4,6 +4,8 @@ import {
   requiredOutboundSecretKind,
 } from "./connectionActivation.js";
 
+const LIVE_INBOUND_MODES = new Set(["none", "api_key", "hmac_signature"]);
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -57,8 +59,12 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
     },
     {
       code: "UNVERIFIED_POLICY",
-      ok: !(environment === "production" && verification.allow_unverified === true),
-      message: "Production traffic is not configured to bypass verification.",
+      ok:
+        verificationMode !== "none"
+        || (environment !== "production" && verification.allow_unverified === true),
+      message: verificationMode === "none"
+        ? "Sandbox unverified traffic is explicitly enabled."
+        : "Inbound traffic uses a verification policy.",
     },
     {
       code: "CREDENTIAL",
@@ -69,12 +75,23 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
     },
   ];
 
+  const configured = checks.every((check) => check.ok);
+  const liveMode = LIVE_INBOUND_MODES.has(verificationMode);
+  const runtimeAvailable = configured && liveMode;
+  const runtimeStatus = runtimeAvailable
+    ? "AVAILABLE"
+    : verificationMode === "oauth2_jwt"
+      ? "OAUTH2_JWT_RUNTIME_PENDING"
+      : verificationMode && !liveMode
+        ? "VERIFICATION_MODE_UNSUPPORTED"
+        : "CONFIGURATION_INCOMPLETE";
+
   return {
-    configured: checks.every((check) => check.ok),
+    configured,
     activation_ready: activation.ready,
     activation_blockers: activation.blockers,
-    runtime_available: false,
-    runtime_status: "PUBLIC_INBOUND_RUNTIME_NOT_RESTORED",
+    runtime_available: runtimeAvailable,
+    runtime_status: runtimeStatus,
     direction,
     inbound_path_suffix: text(inbound.inbound_path_suffix) || null,
     verification_mode: verificationMode || null,
@@ -129,6 +146,7 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
 }
 
 export {
+  LIVE_INBOUND_MODES,
   buildInboundReadiness,
   buildOutboundReadiness,
   requiredInboundSecretKind,
