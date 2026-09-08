@@ -279,14 +279,6 @@ async function verifyInboundRequest({
     return { verified: true, mode: "hmac_signature", assurance: "signed_payload" };
   }
 
-  if (mode === "oauth2_jwt") {
-    throw new ConnectionInboundRuntimeError(
-      "OAuth2 JWT inbound verification is configured but the V2 JWKS verifier is not yet enabled.",
-      "OAUTH2_JWT_RUNTIME_UNAVAILABLE",
-      503
-    );
-  }
-
   throw new ConnectionInboundRuntimeError("Inbound verification mode is unsupported.", "VERIFICATION_MODE_UNSUPPORTED", 503);
 }
 
