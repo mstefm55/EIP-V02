@@ -8,6 +8,7 @@ import path from "node:path";
 import dbPlugin from "./plugins/db.js";
 import authShellPlugin from "./plugins/authShell.js";
 import authTransportHardeningPlugin from "./plugins/authTransportHardening.js";
+import connectionActivationGuard from "./plugins/connectionActivationGuard.js";
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
 import authSessionTransportRoutes from "./routes/auth_session_transport.js";
@@ -218,6 +219,7 @@ async function buildServer(options = {}) {
   await app.register(dbPlugin);
   await app.register(authShellPlugin);
   await app.register(authTransportHardeningPlugin);
+  await app.register(connectionActivationGuard);
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
