@@ -1,3 +1,5 @@
+const SUPPORTED_INBOUND_VERIFICATION_MODES = new Set(["none", "api_key", "hmac_signature"]);
+
 function text(value) {
   return String(value ?? "").trim();
 }
@@ -71,6 +73,13 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
     if (!verificationMode) {
       add("verification.mode", "ACTIVATION_VERIFICATION_REQUIRED", "Inbound verification mode is required before activation.");
     }
+    if (verificationMode && !SUPPORTED_INBOUND_VERIFICATION_MODES.has(verificationMode)) {
+      add(
+        "verification.mode",
+        "ACTIVATION_VERIFICATION_UNSUPPORTED",
+        "Inbound verification must use the governed EIP connection modes: API key, HMAC signature, or sandbox-only none."
+      );
+    }
     if (environment === "production" && verificationMode === "none") {
       add("verification.mode", "ACTIVATION_PRODUCTION_VERIFICATION_REQUIRED", "Production inbound connections require request verification.");
     }
@@ -97,17 +106,6 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
       if (text(verification.hmac_signature?.payload_mode).toLowerCase() === "timestamp_sha256"
         && !text(verification.hmac_signature?.timestamp_header)) {
         add("verification.hmac_signature.timestamp_header", "ACTIVATION_HMAC_TIMESTAMP_REQUIRED", "Timestamp-based HMAC verification requires a timestamp header.");
-      }
-    }
-    if (verificationMode === "oauth2_jwt") {
-      if (!text(verification.oauth2_jwt?.issuer)) {
-        add("verification.oauth2_jwt.issuer", "ACTIVATION_JWT_ISSUER_REQUIRED", "JWT verification requires an issuer.");
-      }
-      if (!text(verification.oauth2_jwt?.audience)) {
-        add("verification.oauth2_jwt.audience", "ACTIVATION_JWT_AUDIENCE_REQUIRED", "JWT verification requires an audience.");
-      }
-      if (!text(verification.oauth2_jwt?.jwks_url)) {
-        add("verification.oauth2_jwt.jwks_url", "ACTIVATION_JWT_JWKS_REQUIRED", "JWT verification requires a JWKS URL.");
       }
     }
   }
@@ -161,6 +159,7 @@ function buildConnectionActivationStatus(profile, credentialStatuses = {}) {
 }
 
 export {
+  SUPPORTED_INBOUND_VERIFICATION_MODES,
   activeSecret,
   buildConnectionActivationStatus,
   requiredConnectionCredentialKinds,
