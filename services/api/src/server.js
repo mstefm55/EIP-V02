@@ -14,6 +14,7 @@ import authRoutes from "./routes/auth.js";
 import authSessionTransportRoutes from "./routes/auth_session_transport.js";
 import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
+import publicConnectionRoutes from "./routes/public_connections.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
 import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
@@ -223,6 +224,7 @@ async function buildServer(options = {}) {
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
+  await app.register(publicConnectionRoutes);
   await app.register(authOrganisationRoutes, { prefix: "/api/eip" });
   await app.register(authRoutes, { prefix: "/api/eip" });
   await app.register(authSessionTransportRoutes, { prefix: "/api/eip" });
