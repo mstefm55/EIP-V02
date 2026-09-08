@@ -5,6 +5,7 @@ import {
   resolvePublicConnection,
   verifyInboundRequest,
 } from "../services/connections/connectionInboundRuntime.js";
+import { claimInboundReceipt } from "../services/connections/connectionInboundReceipt.js";
 
 const PUBLIC_METHODS = Object.freeze(["POST", "PUT", "PATCH"]);
 
@@ -52,11 +53,18 @@ function configureRawBodyParser(app) {
   });
 }
 
+function responseTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
 export default async function publicConnectionRoutes(app, options = {}) {
   const deps = {
     resolvePublicConnection,
     assertInboundRequestAllowed,
     verifyInboundRequest,
+    claimInboundReceipt,
     ...(options.services || {}),
   };
 
@@ -94,7 +102,50 @@ export default async function publicConnectionRoutes(app, options = {}) {
         config: app.config,
       });
 
-      const acceptedAt = new Date().toISOString();
+      const receipt = await deps.claimInboundReceipt({
+        pool: app.db,
+        tenantId: tenant.tenant_id,
+        profile,
+        request: {
+          headers: req.headers,
+          query: req.query,
+          rawBody: req.body,
+        },
+        verification,
+        channel: requestedChannel,
+        correlationId,
+      });
+
+      if (receipt.duplicate) {
+        req.log.info({
+          event: "connection_inbound_transport_duplicate",
+          correlation_id: correlationId,
+          tenant_id: tenant.tenant_id,
+          connection_code: profile?.identity?.connection_code || null,
+          verification_mode: verification.mode,
+          channel: requestedChannel,
+          receipt_id: receipt.receipt_id,
+        });
+
+        return reply.code(202).send({
+          ok: true,
+          accepted: true,
+          duplicate: true,
+          correlation_id: correlationId,
+          receipt_id: receipt.receipt_id,
+          accepted_at: responseTimestamp(receipt.accepted_at),
+          connection_code: profile?.identity?.connection_code || null,
+          verification: {
+            mode: verification.mode,
+            verified: verification.verified === true,
+            assurance: verification.assurance,
+          },
+          channel: requestedChannel,
+          dispatch_status: "DUPLICATE_SUPPRESSED",
+          dispatch_message: "This event ID was already accepted with the same payload. Duplicate business dispatch was suppressed.",
+        });
+      }
+
       req.log.info({
         event: "connection_inbound_transport_accepted",
         correlation_id: correlationId,
@@ -103,13 +154,16 @@ export default async function publicConnectionRoutes(app, options = {}) {
         verification_mode: verification.mode,
         channel: requestedChannel,
         payload_bytes: Buffer.isBuffer(req.body) ? req.body.length : 0,
+        receipt_id: receipt.receipt_id,
       });
 
       return reply.code(202).send({
         ok: true,
         accepted: true,
+        duplicate: false,
         correlation_id: correlationId,
-        accepted_at: acceptedAt,
+        receipt_id: receipt.receipt_id,
+        accepted_at: responseTimestamp(receipt.accepted_at) || new Date().toISOString(),
         connection_code: profile?.identity?.connection_code || null,
         verification: {
           mode: verification.mode,
@@ -118,7 +172,7 @@ export default async function publicConnectionRoutes(app, options = {}) {
         },
         channel: requestedChannel,
         dispatch_status: "NOT_BOUND",
-        dispatch_message: "Transport verification succeeded. Business dispatch requires a governed Process/Service Object binding.",
+        dispatch_message: "Transport verification and idempotency succeeded. Business dispatch requires a governed Process/Service Object binding.",
       });
     } catch (error) {
       const mapped = mapRuntimeError(error);
@@ -164,4 +218,11 @@ export default async function publicConnectionRoutes(app, options = {}) {
   });
 }
 
-export { PUBLIC_METHODS, assertChannelMatch, channelForRequest, configureRawBodyParser, mapRuntimeError };
+export {
+  PUBLIC_METHODS,
+  assertChannelMatch,
+  channelForRequest,
+  configureRawBodyParser,
+  mapRuntimeError,
+  responseTimestamp,
+};
