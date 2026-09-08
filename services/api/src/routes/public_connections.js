@@ -6,6 +6,7 @@ import {
   verifyInboundRequest,
 } from "../services/connections/connectionInboundRuntime.js";
 import { acceptInboundRequest } from "../services/connections/connectionInboundDispatch.js";
+import { enforceInboundRateLimit } from "../services/connections/connectionInboundRateLimit.js";
 
 const PUBLIC_METHODS = Object.freeze(["POST", "PUT", "PATCH"]);
 
@@ -15,12 +16,15 @@ function normalizeText(value) {
 
 function mapRuntimeError(error) {
   if (error instanceof ConnectionInboundRuntimeError) {
+    const retryAfterSec = Number(error.retryAfterSec);
     return {
       status: Number.isInteger(error.status) ? error.status : 400,
       error: error.code || "CONNECTION_INBOUND_REJECTED",
+      retry_after_sec:
+        Number.isInteger(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec : null,
     };
   }
-  return { status: 500, error: "CONNECTION_INBOUND_UNAVAILABLE" };
+  return { status: 500, error: "CONNECTION_INBOUND_UNAVAILABLE", retry_after_sec: null };
 }
 
 function channelForRequest(req) {
@@ -73,6 +77,7 @@ export default async function publicConnectionRoutes(app, options = {}) {
   const deps = {
     resolvePublicConnection,
     assertInboundRequestAllowed,
+    enforceInboundRateLimit,
     verifyInboundRequest,
     acceptInboundRequest,
     ...(options.services || {}),
@@ -101,6 +106,15 @@ export default async function publicConnectionRoutes(app, options = {}) {
         origin: req.headers?.origin,
         ip: req.ip,
         rawBody: req.body,
+      });
+
+      // Rate limiting deliberately precedes credential verification. The shared
+      // PostgreSQL bucket therefore counts bad-auth attempts as well as accepted
+      // requests and remains authoritative across multiple API replicas.
+      await deps.enforceInboundRateLimit({
+        pool: app.db,
+        tenantId: tenant.tenant_id,
+        profile,
       });
 
       const verification = await deps.verifyInboundRequest({
@@ -208,10 +222,14 @@ export default async function publicConnectionRoutes(app, options = {}) {
         route_suffix: normalizeText(req.params?.suffix).slice(0, 128),
         ip: req.ip || null,
       });
+      if (mapped.retry_after_sec) {
+        reply.header("Retry-After", String(mapped.retry_after_sec));
+      }
       return reply.code(mapped.status).send({
         ok: false,
         error: mapped.error,
         correlation_id: correlationId,
+        ...(mapped.retry_after_sec ? { retry_after_sec: mapped.retry_after_sec } : {}),
       });
     }
   }
