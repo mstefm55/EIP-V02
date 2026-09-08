@@ -95,6 +95,7 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
 
   for (const [key, entry] of Object.entries(value)) {
     const compact = compactKey(key);
+    const compactPath = compactKey(path);
     if (FORBIDDEN_OBJECT_KEYS.has(key)) {
       throw new ConnectionInputPolicyError(
         "Connection profile contains a forbidden object key.",
@@ -111,6 +112,14 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
         `${path}.${key}`
       );
     }
+    if (compactPath === "profileverification" && compact === "oauth2jwt") {
+      throw new ConnectionInputPolicyError(
+        "OAuth/JWT is not an inbound EIP connection authentication mode.",
+        "CONNECTION_INBOUND_AUTH_MODE_FORBIDDEN",
+        400,
+        `${path}.${key}`
+      );
+    }
     if (isForbiddenSecretValueKey(key, entry)) {
       throw new ConnectionInputPolicyError(
         "Credential material must be managed through the encrypted connection secret lifecycle, not the profile payload.",
@@ -120,7 +129,7 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
       );
     }
 
-    if (compactKey(path).endsWith("defaultheaders") && FORBIDDEN_HEADER_KEYS.has(compact)) {
+    if (compactPath.endsWith("defaultheaders") && FORBIDDEN_HEADER_KEYS.has(compact)) {
       throw new ConnectionInputPolicyError(
         "Sensitive authentication headers must not be persisted in connection profile metadata.",
         "CONNECTION_SENSITIVE_HEADER_FORBIDDEN",
