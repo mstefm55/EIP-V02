@@ -5,7 +5,7 @@ import {
   resolvePublicConnection,
   verifyInboundRequest,
 } from "../services/connections/connectionInboundRuntime.js";
-import { claimInboundReceipt } from "../services/connections/connectionInboundReceipt.js";
+import { acceptInboundRequest } from "../services/connections/connectionInboundDispatch.js";
 
 const PUBLIC_METHODS = Object.freeze(["POST", "PUT", "PATCH"]);
 
@@ -59,12 +59,22 @@ function responseTimestamp(value) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
+function dispatchMessage(status) {
+  if (status === "PROCESS_STARTED") {
+    return "Inbound event was mapped to a governed Service Object and handed to the canonical Process Engine.";
+  }
+  if (status === "NOT_BOUND") {
+    return "Transport verification and idempotency succeeded. Passthrough mapping does not start business processing.";
+  }
+  return "Inbound event was accepted.";
+}
+
 export default async function publicConnectionRoutes(app, options = {}) {
   const deps = {
     resolvePublicConnection,
     assertInboundRequestAllowed,
     verifyInboundRequest,
-    claimInboundReceipt,
+    acceptInboundRequest,
     ...(options.services || {}),
   };
 
@@ -102,7 +112,7 @@ export default async function publicConnectionRoutes(app, options = {}) {
         config: app.config,
       });
 
-      const receipt = await deps.claimInboundReceipt({
+      const acceptance = await deps.acceptInboundRequest({
         pool: app.db,
         tenantId: tenant.tenant_id,
         profile,
@@ -115,8 +125,10 @@ export default async function publicConnectionRoutes(app, options = {}) {
         channel: requestedChannel,
         correlationId,
       });
+      const receipt = acceptance.receipt || {};
+      const dispatch = acceptance.dispatch || null;
 
-      if (receipt.duplicate) {
+      if (acceptance.duplicate) {
         req.log.info({
           event: "connection_inbound_transport_duplicate",
           correlation_id: correlationId,
@@ -125,6 +137,7 @@ export default async function publicConnectionRoutes(app, options = {}) {
           verification_mode: verification.mode,
           channel: requestedChannel,
           receipt_id: receipt.receipt_id,
+          original_dispatch_status: dispatch?.status || null,
         });
 
         return reply.code(202).send({
@@ -142,6 +155,10 @@ export default async function publicConnectionRoutes(app, options = {}) {
           },
           channel: requestedChannel,
           dispatch_status: "DUPLICATE_SUPPRESSED",
+          original_dispatch_status: dispatch?.status || null,
+          service_object_id: dispatch?.service_object_id || null,
+          process_instance_id: dispatch?.process_instance_id || null,
+          process_def_id: dispatch?.process_def_id || null,
           dispatch_message: "This event ID was already accepted with the same payload. Duplicate business dispatch was suppressed.",
         });
       }
@@ -155,6 +172,9 @@ export default async function publicConnectionRoutes(app, options = {}) {
         channel: requestedChannel,
         payload_bytes: Buffer.isBuffer(req.body) ? req.body.length : 0,
         receipt_id: receipt.receipt_id,
+        dispatch_status: dispatch?.status || null,
+        service_object_id: dispatch?.service_object_id || null,
+        process_instance_id: dispatch?.process_instance_id || null,
       });
 
       return reply.code(202).send({
@@ -171,8 +191,11 @@ export default async function publicConnectionRoutes(app, options = {}) {
           assurance: verification.assurance,
         },
         channel: requestedChannel,
-        dispatch_status: "NOT_BOUND",
-        dispatch_message: "Transport verification and idempotency succeeded. Business dispatch requires a governed Process/Service Object binding.",
+        dispatch_status: dispatch?.status || "NOT_BOUND",
+        service_object_id: dispatch?.service_object_id || null,
+        process_instance_id: dispatch?.process_instance_id || null,
+        process_def_id: dispatch?.process_def_id || null,
+        dispatch_message: dispatchMessage(dispatch?.status || "NOT_BOUND"),
       });
     } catch (error) {
       const mapped = mapRuntimeError(error);
@@ -223,6 +246,7 @@ export {
   assertChannelMatch,
   channelForRequest,
   configureRawBodyParser,
+  dispatchMessage,
   mapRuntimeError,
   responseTimestamp,
 };
