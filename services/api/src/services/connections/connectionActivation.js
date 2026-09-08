@@ -1,4 +1,5 @@
 import { validateInboundMappingConfig } from "./connectionInboundMapping.js";
+import { inspectInboundRateLimit } from "./connectionRateLimitPolicy.js";
 
 const SUPPORTED_INBOUND_VERIFICATION_MODES = new Set(["none", "api_key", "hmac_signature"]);
 const SUPPORTED_IDEMPOTENCY_LOCATIONS = new Set(["header", "query", "body"]);
@@ -62,6 +63,7 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
   const eventLocation = text(idempotency.event_id_location).toLowerCase();
   const idempotencyScope = text(idempotency.idempotency_scope).toLowerCase();
   const mappingMode = text(routing.mapping_mode).toLowerCase();
+  const rateLimit = inspectInboundRateLimit(profile);
 
   if (!["inbound", "outbound", "both"].includes(direction)) {
     add("identity.direction", "ACTIVATION_DIRECTION_REQUIRED", "Connection direction must be configured before activation.");
@@ -134,6 +136,11 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
     if (mappingMode === "mapped") {
       for (const mappingIssue of validateInboundMappingConfig(profile, { requireMapped: true })) {
         add(mappingIssue.path, `ACTIVATION_${mappingIssue.code}`, mappingIssue.message);
+      }
+    }
+    if (rateLimit.configured && !rateLimit.valid) {
+      for (const rateIssue of rateLimit.errors) {
+        add(rateIssue.path, `ACTIVATION_${rateIssue.code}`, rateIssue.message);
       }
     }
   }
