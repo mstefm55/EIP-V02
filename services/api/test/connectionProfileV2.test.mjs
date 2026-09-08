@@ -18,6 +18,8 @@ const taxonomy = {
   CONNECTION_MAPPING_MODE: [{ code: "passthrough" }],
   CONNECTION_HTTP_METHOD: [{ code: "GET" }, { code: "POST" }],
   CONNECTION_LOG_LEVEL: [{ code: "info" }],
+  CONNECTION_EVENT_ID_LOCATION: [{ code: "header" }, { code: "query" }, { code: "body" }],
+  CONNECTION_IDEMPOTENCY_SCOPE: [{ code: "connection" }, { code: "tenant" }],
 };
 
 function validProfile(overrides = {}) {
@@ -36,7 +38,11 @@ function validProfile(overrides = {}) {
     },
     verification: { mode: "api_key" },
     outbound: { auth_mode: "none", test_request_method: "GET" },
-    idempotency: { event_id_location: "header", event_id_key: "X-Event-Id" },
+    idempotency: {
+      event_id_location: "header",
+      event_id_key: "X-Event-Id",
+      idempotency_scope: "connection",
+    },
     routing: {
       channel: "custom",
       mapping_mode: "passthrough",
@@ -124,7 +130,6 @@ test("new profiles default to disabled drafts without inventing governed referen
   profile.identity.is_enabled = true;
   const activationErrors = validateConnectionProfile(profile, taxonomy);
   assert.ok(activationErrors.some((error) => error.path === "identity.direction"));
-  assert.ok(activationErrors.some((error) => error.path === "verification.mode"));
   assert.ok(activationErrors.some((error) => error.path === "routing.channel"));
 });
 
@@ -143,6 +148,73 @@ test("production inbound profile fails closed when verification is none", () => 
 
   const errors = validateConnectionProfile(profile, taxonomy);
   assert.ok(errors.some((error) => error.code === "PRODUCTION_VERIFICATION_REQUIRED"));
+});
+
+test("outbound-only activation does not require inbound verification or idempotency", () => {
+  const profile = validProfile({
+    identity: {
+      connection_name: "Outbound Provider",
+      connection_code: "outbound_provider",
+      connection_kind: "custom",
+      direction: "outbound",
+      environment: "production",
+      is_enabled: true,
+    },
+    inbound: {
+      inbound_path_suffix: "",
+      http_method: "",
+    },
+    verification: { mode: "" },
+    idempotency: {
+      event_id_location: "",
+      event_id_key: "",
+      idempotency_scope: "",
+    },
+    outbound: {
+      base_url: "https://provider.example",
+      auth_mode: "none",
+      test_request_method: "GET",
+    },
+  });
+
+  const errors = validateConnectionProfile(profile, taxonomy);
+  assert.equal(errors.some((error) => error.path.startsWith("verification.")), false);
+  assert.equal(errors.some((error) => error.path.startsWith("idempotency.")), false);
+  assert.equal(errors.some((error) => error.path.startsWith("inbound.")), false);
+  assert.deepEqual(errors, []);
+});
+
+test("inbound-only activation does not require outbound authentication settings", () => {
+  const profile = validProfile({
+    identity: {
+      connection_name: "Inbound Sender",
+      connection_code: "inbound_sender",
+      connection_kind: "custom",
+      direction: "inbound",
+      environment: "production",
+      is_enabled: true,
+    },
+    verification: { mode: "api_key" },
+    outbound: {
+      base_url: "",
+      auth_mode: "",
+      test_request_method: "",
+    },
+  });
+
+  const errors = validateConnectionProfile(profile, taxonomy);
+  assert.equal(errors.some((error) => error.path.startsWith("outbound.")), false);
+  assert.deepEqual(errors, []);
+});
+
+test("inbound idempotency location and scope must use governed metadata", () => {
+  const profile = validProfile();
+  profile.idempotency.event_id_location = "cookie";
+  profile.idempotency.idempotency_scope = "global";
+
+  const errors = validateConnectionProfile(profile, taxonomy);
+  assert.ok(errors.some((error) => error.path === "idempotency.event_id_location"));
+  assert.ok(errors.some((error) => error.path === "idempotency.idempotency_scope"));
 });
 
 test("unknown governed taxonomy values are rejected", () => {
