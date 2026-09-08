@@ -5,6 +5,8 @@ import {
   buildIdempotencyKeyDigest,
   claimInboundReceipt,
   extractInboundEventId,
+  safeDispatchProjection,
+  writeInboundDispatchEvidenceWithClient,
 } from "../src/services/connections/connectionInboundReceipt.js";
 
 const TENANT_A = "11111111-1111-4111-8111-111111111111";
@@ -106,6 +108,7 @@ test("idempotency digest preserves tenant and governed scope boundaries", () => 
 
 function mockTransactionClient({ existing = null } = {}) {
   const writes = [];
+  const dispatchWrites = [];
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -124,10 +127,14 @@ function mockTransactionClient({ existing = null } = {}) {
           rows: [{ id: "33333333-3333-4333-8333-333333333333", created_at: "2026-09-08T20:00:00.000Z" }],
         };
       }
+      if (text.includes("UPDATE eip_core.info_record") && text.includes("'{dispatch}'")) {
+        dispatchWrites.push(params);
+        return { rowCount: 1, rows: [{ id: params[1] }] };
+      }
       throw new Error(`Unexpected query: ${text}`);
     },
   };
-  return { client, calls, writes };
+  return { client, calls, writes, dispatchWrites };
 }
 
 function transactionFor(client) {
@@ -173,14 +180,23 @@ test("claimInboundReceipt writes bounded kernel evidence without raw payload or 
   assert.doesNotMatch(serialized, /evt-1/);
 });
 
-test("claimInboundReceipt suppresses identical duplicates", async () => {
+test("claimInboundReceipt suppresses identical duplicates and projects prior dispatch evidence", async () => {
   const body = Buffer.from('{"event_id":"evt-1","value":5}');
   const digest = await import("../src/services/connections/connectionInboundReceipt.js")
     .then((module) => module.sha256Hex(body));
   const { client, writes } = mockTransactionClient({
     existing: {
       id: "55555555-5555-4555-8555-555555555555",
-      payload: { payload_digest: digest },
+      payload: {
+        payload_digest: digest,
+        dispatch: {
+          status: "PROCESS_STARTED",
+          service_object_id: "66666666-6666-4666-8666-666666666666",
+          process_instance_id: "77777777-7777-4777-8777-777777777777",
+          process_def_id: "88888888-8888-4888-8888-888888888888",
+          extra_secret: "must-not-project",
+        },
+      },
       attrs: {},
       created_at: "2026-09-08T19:00:00.000Z",
     },
@@ -193,12 +209,15 @@ test("claimInboundReceipt suppresses identical duplicates", async () => {
     request: { rawBody: body },
     verification: { mode: "hmac_signature", verified: true, assurance: "signed_payload" },
     channel: "public",
-    correlationId: "66666666-6666-4666-8666-666666666666",
+    correlationId: "99999999-9999-4999-8999-999999999999",
     transaction: transactionFor(client),
   });
 
   assert.equal(result.duplicate, true);
   assert.equal(result.receipt_id, "55555555-5555-4555-8555-555555555555");
+  assert.equal(result.dispatch.status, "PROCESS_STARTED");
+  assert.equal(result.dispatch.service_object_id, "66666666-6666-4666-8666-666666666666");
+  assert.equal(result.dispatch.extra_secret, undefined);
   assert.equal(writes.length, 0);
 });
 
@@ -220,10 +239,47 @@ test("claimInboundReceipt rejects reused event IDs with different payloads", asy
       request: { rawBody: Buffer.from('{"event_id":"evt-1","value":6}') },
       verification: { mode: "api_key", verified: true, assurance: "shared_secret" },
       channel: "public",
-      correlationId: "88888888-8888-4888-8888-888888888888",
+      correlationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       transaction: transactionFor(client),
     }),
     (error) => error?.code === "IDEMPOTENCY_CONFLICT" && error?.status === 409
   );
   assert.equal(writes.length, 0);
+});
+
+test("dispatch evidence projection is allowlisted and never persists arbitrary payload or credential material", async () => {
+  const rawDispatch = {
+    status: "process_started",
+    service_object_id: "11111111-2222-4333-8444-555555555555",
+    process_instance_id: "22222222-3333-4444-8555-666666666666",
+    process_def_id: "33333333-4444-4555-8666-777777777777",
+    reused: true,
+    raw_payload: { card_number: "4111111111111111" },
+    authorization: "Bearer secret",
+    api_key: "secret",
+  };
+  const projected = safeDispatchProjection(rawDispatch);
+  assert.deepEqual(projected, {
+    status: "PROCESS_STARTED",
+    service_object_id: rawDispatch.service_object_id,
+    process_instance_id: rawDispatch.process_instance_id,
+    process_def_id: rawDispatch.process_def_id,
+    reused: true,
+    recorded_at: null,
+  });
+
+  const { client, dispatchWrites } = mockTransactionClient();
+  const written = await writeInboundDispatchEvidenceWithClient({
+    client,
+    tenantId: TENANT_A,
+    receiptId: "44444444-5555-4666-8777-888888888888",
+    dispatch: rawDispatch,
+    recordedAt: "2026-09-09T00:30:00.000Z",
+  });
+
+  assert.equal(dispatchWrites.length, 1);
+  const serialized = dispatchWrites[0][3];
+  assert.doesNotMatch(serialized, /4111111111111111|Bearer secret|api_key/);
+  assert.equal(written.status, "PROCESS_STARTED");
+  assert.equal(written.recorded_at, "2026-09-09T00:30:00.000Z");
 });
