@@ -18,6 +18,7 @@ import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 import ownerAdminConsoleRoutes from "./routes/owner_admin_console.js";
 import connectionRoutes from "./routes/connections.js";
+import connectionReadinessRoutes from "./routes/connections_readiness.js";
 import { advanceInstance, createInstance, findActiveInstance, updateTaskStatus } from "./core/core_process_engine.js";
 
 const DEFAULT_PORT = 4010;
@@ -227,6 +228,7 @@ async function buildServer(options = {}) {
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
   await app.register(ownerAdminConsoleRoutes, { prefix: "/api/eip" });
   await app.register(connectionRoutes, { prefix: "/api/eip" });
+  await app.register(connectionReadinessRoutes, { prefix: "/api/eip" });
   await app.register(planningScheduleRoutes, { prefix: "/api/eip" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip/core" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip" });
