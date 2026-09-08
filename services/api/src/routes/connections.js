@@ -18,6 +18,8 @@ import {
   revokeSecret,
   rotateSecret,
 } from "../services/connections/connectionSecretStore.js";
+import { generateConnectionApiKey } from "../services/connections/connectionApiKey.js";
+import { deprecateConnectionProfile } from "../services/connections/connectionLifecycle.js";
 import {
   loadConnectionTaxonomy,
   publicConnectionTaxonomy,
@@ -150,7 +152,9 @@ function buildDependencies(overrides = {}) {
     listConnectionProfiles,
     updateConnectionHealth,
     updateConnectionProfile,
+    deprecateConnectionProfile,
     assertConnectionProfileInputSafe,
+    generateConnectionApiKey,
     listSecretStatuses,
     revokeSecret,
     rotateSecret,
@@ -231,7 +235,9 @@ export default async function connectionRoutes(app, options = {}) {
 
       try {
         const item = await deps.getConnectionProfile(app.db, session.tenant_id, req.params.code);
-        if (!item) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        if (!item || item.setting_status === "deprecated") {
+          return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        }
         const secretStatus = await deps.withTenantTransaction(app.db, session.tenant_id, (client) =>
           deps.listSecretStatuses(client, session.tenant_id, req.params.code)
         );
@@ -288,6 +294,37 @@ export default async function connectionRoutes(app, options = {}) {
     }
   );
 
+  app.delete(
+    "/owner-admin/connections/:code",
+    { schema: { params: connectionCodeParamsSchema() } },
+    async (req, reply) => {
+      const session = await requireConnectionPermission(
+        app,
+        req,
+        reply,
+        PROFILE_WRITE_PERMISSIONS,
+        { csrf: true }
+      );
+      if (!session) return;
+
+      try {
+        const item = await deps.deprecateConnectionProfile(
+          app.db,
+          session.tenant_id,
+          req.params.code,
+          session.identity_id
+        );
+        return reply.send({ ok: true, item });
+      } catch (error) {
+        const mapped = mapConnectionError(error);
+        if (mapped.status >= 500) {
+          req.log.error({ event: "connection_delete_error", code: error?.code || error?.name || "ERROR" });
+        }
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    }
+  );
+
   app.get(
     "/owner-admin/connections/:code/secrets",
     { schema: { params: connectionCodeParamsSchema() } },
@@ -297,13 +334,56 @@ export default async function connectionRoutes(app, options = {}) {
 
       try {
         const profile = await deps.getConnectionProfile(app.db, session.tenant_id, req.params.code);
-        if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        if (!profile || profile.setting_status === "deprecated") {
+          return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        }
         const items = await deps.withTenantTransaction(app.db, session.tenant_id, (client) =>
           deps.listSecretStatuses(client, session.tenant_id, req.params.code)
         );
         return reply.send({ ok: true, items });
       } catch (error) {
         const mapped = mapConnectionError(error);
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    }
+  );
+
+  app.post(
+    "/owner-admin/connections/:code/api-key/generate",
+    { schema: { params: connectionCodeParamsSchema() } },
+    async (req, reply) => {
+      const session = await requireConnectionPermission(
+        app,
+        req,
+        reply,
+        SECURITY_WRITE_PERMISSIONS,
+        { csrf: true }
+      );
+      if (!session) return;
+      const assurance = requireFreshSecretAssurance(session, app.config);
+      if (!assurance.ok) return reply.code(assurance.status).send({ ok: false, error: assurance.error });
+
+      try {
+        const generated = await deps.withTenantTransaction(app.db, session.tenant_id, (client) =>
+          deps.generateConnectionApiKey({
+            client,
+            tenantId: session.tenant_id,
+            connectionCode: req.params.code,
+            actorIdentityId: session.identity_id,
+            config: app.config,
+          })
+        );
+        return reply.send({
+          ok: true,
+          api_key: generated.secret,
+          raw_key: generated.value,
+          shown_once: true,
+        });
+      } catch (error) {
+        const mapped = mapConnectionError(error);
+        if (mapped.status >= 500) {
+          req.log.error({ event: "connection_api_key_generate_error", code: error?.code || error?.name || "ERROR" });
+        }
         return reply.code(mapped.status).send(mapped.body);
       }
     }
@@ -401,7 +481,9 @@ export default async function connectionRoutes(app, options = {}) {
 
       try {
         const item = await deps.getConnectionProfile(app.db, session.tenant_id, req.params.code);
-        if (!item) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        if (!item || item.setting_status === "deprecated") {
+          return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        }
         const detail = deps.toConnectionDetailDto(item, {});
         return reply.send({ ok: true, health: detail.health || {} });
       } catch (error) {
@@ -421,7 +503,9 @@ export default async function connectionRoutes(app, options = {}) {
       let profile;
       try {
         profile = await deps.getConnectionProfile(app.db, session.tenant_id, req.params.code);
-        if (!profile) return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        if (!profile || profile.setting_status === "deprecated") {
+          return reply.code(404).send({ ok: false, error: "CONNECTION_NOT_FOUND" });
+        }
 
         const baseUrl = normalizeText(profile.outbound?.base_url);
         if (!baseUrl) {
