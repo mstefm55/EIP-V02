@@ -73,8 +73,18 @@ function ContractSelectPanel({ node, ctx }) {
           }
         }
       }
+
+      if (typeof ctx?.workbench?.refresh === "function") {
+        ctx.workbench.refresh();
+      }
     },
-    [ctx?.selection, props.clear_targets_on_change, props.select_targets_on_change, selectionTargetName]
+    [
+      ctx?.selection,
+      ctx?.workbench,
+      props.clear_targets_on_change,
+      props.select_targets_on_change,
+      selectionTargetName,
+    ]
   );
 
   const load = useCallback(async () => {
