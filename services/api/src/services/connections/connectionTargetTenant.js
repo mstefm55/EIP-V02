@@ -8,15 +8,14 @@ function toTargetTenantDto(row) {
     code: row?.tenant_code || null,
     name: row?.tenant_name || row?.tenant_code || null,
     status: row?.tenant_status || null,
-    kind: row?.tenant_kind || null,
-    tenancy_model: row?.tenancy_model || null,
+    tenancy_mode: row?.tenancy_mode || null,
   };
 }
 
 async function listConnectionTargetTenants(pool) {
   const result = await pool.query(
     `
-    SELECT tenant_id, tenant_code, tenant_name, tenant_status, tenant_kind, tenancy_model
+    SELECT tenant_id, tenant_code, tenant_name, tenant_status, tenancy_mode
     FROM kernel.tenants
     WHERE tenant_status = 'active'
     ORDER BY lower(tenant_name), lower(tenant_code), tenant_id
@@ -31,7 +30,7 @@ async function resolveConnectionTargetTenant(pool, tenantCode) {
 
   const result = await pool.query(
     `
-    SELECT tenant_id, tenant_code, tenant_name, tenant_status, tenant_kind, tenancy_model
+    SELECT tenant_id, tenant_code, tenant_name, tenant_status, tenancy_mode
     FROM kernel.tenants
     WHERE tenant_code = $1
       AND tenant_status = 'active'
