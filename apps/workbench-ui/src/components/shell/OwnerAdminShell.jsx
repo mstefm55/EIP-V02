@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Briefcase,
+  Building2,
   CalendarClock,
   ClipboardList,
   Copy,
@@ -341,6 +342,20 @@ function OwnerAdminShell({
         </nav>
 
         <div className="owner-header-actions">
+          <div
+            className="owner-profile-trigger"
+            role="group"
+            aria-label={`Current organisation: ${organisationLabel}`}
+            title={`Current organisation: ${organisationLabel}`}
+            style={{ cursor: "default" }}
+          >
+            <Building2 size={15} strokeWidth={2} aria-hidden="true" />
+            <span className="owner-profile-meta">
+              <strong>Organisation</strong>
+              <small>{organisationLabel}</small>
+            </span>
+          </div>
+
           <button
             type="button"
             className="ghost-button"
