@@ -377,10 +377,16 @@ function ContractTablePanel({ node, ctx }) {
                 forceNewRef.current = true;
                 if (selectionConfig?.clear_on_new && typeof selectionTarget.select === "function") {
                   selectionTarget.select(null);
-                  return;
-                }
-                if (typeof selectionTarget.clear === "function") {
+                } else if (typeof selectionTarget.clear === "function") {
                   selectionTarget.clear();
+                }
+
+                const newActionTarget = normalizeSelectionTarget(selectionConfig?.new_action?.select_target);
+                if (newActionTarget && typeof ctx?.selection?.selectTarget === "function") {
+                  ctx.selection.selectTarget(
+                    newActionTarget,
+                    selectionConfig?.new_action?.select_value || null
+                  );
                 }
               }}
             >
