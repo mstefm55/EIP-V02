@@ -12,6 +12,14 @@ const migrationPath = path.resolve(
 );
 const source = fs.readFileSync(migrationPath, "utf8");
 
+function extractIdentityUpdateBlock() {
+  const start = source.indexOf("UPDATE eip_auth.auth_identity AS identity");
+  const end = source.indexOf("-- Fail closed", start);
+  assert.ok(start >= 0, "identity update block is missing");
+  assert.ok(end > start, "identity update block terminator is missing");
+  return source.slice(start, end);
+}
+
 test("permission authority repair mirrors all runtime-supported permission buckets", () => {
   for (const marker of [
     "-> 'permissions'",
@@ -55,11 +63,12 @@ test("permission authority repair grants only the dedicated Connections capabili
 });
 
 test("permission authority repair converges only into canonical attrs.permissions", () => {
-  assert.match(source, /jsonb_set\([\s\S]*?'\{permissions\}'/);
-  assert.doesNotMatch(source, /jsonb_set\([\s\S]*?'\{permission_codes\}'/);
-  assert.doesNotMatch(source, /jsonb_set\([\s\S]*?'\{permissionCodes\}'/);
-  assert.doesNotMatch(source, /jsonb_set\([\s\S]*?'\{authz,permissions\}'/);
-  assert.doesNotMatch(source, /jsonb_set\([\s\S]*?'\{auth,permissions\}'/);
+  const updateBlock = extractIdentityUpdateBlock();
+  assert.match(updateBlock, /jsonb_set\([\s\S]*?'\{permissions\}'/);
+  assert.doesNotMatch(updateBlock, /'\{permission_codes\}'/);
+  assert.doesNotMatch(updateBlock, /'\{permissionCodes\}'/);
+  assert.doesNotMatch(updateBlock, /'\{authz,permissions\}'/);
+  assert.doesNotMatch(updateBlock, /'\{auth,permissions\}'/);
 });
 
 test("permission authority repair validates all dedicated capabilities after update", () => {
