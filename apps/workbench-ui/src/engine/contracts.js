@@ -62,7 +62,9 @@ function resolveContract(contract, ctx, options = {}) {
     auth: ctx?.auth?.session || {},
   };
 
+  const configuredPathParams = resolveValue(contract.path_params || {}, scopes);
   const pathParams = {
+    ...(configuredPathParams && typeof configuredPathParams === "object" ? configuredPathParams : {}),
     ...(options.pathParams || {}),
   };
   if (pathParams.id === undefined) {
