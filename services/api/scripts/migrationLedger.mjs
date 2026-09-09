@@ -16,6 +16,7 @@ const BASELINE_REQUIRED_OBJECTS = Object.freeze([
   "eip_core.agent",
   "eip_core.service_object",
   "eip_core.service_object_party",
+  "eip_core.info_record",
   "eip_core.dropdown_list",
   "eip_core.dropdown_value",
   "eip_core.process_def",
