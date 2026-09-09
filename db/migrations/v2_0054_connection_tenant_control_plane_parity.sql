@@ -35,8 +35,8 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   kind text;
-  key text;
-  value jsonb;
+  current_key text;
+  current_value jsonb;
   output jsonb;
   endpoint text;
   rewritten_endpoint text;
@@ -48,9 +48,15 @@ BEGIN
   kind := jsonb_typeof(node);
 
   IF kind = 'array' THEN
-    SELECT COALESCE(jsonb_agg(pg_temp.rewrite_connection_tenant_contracts(value) ORDER BY ord), '[]'::jsonb)
+    SELECT COALESCE(
+      jsonb_agg(
+        pg_temp.rewrite_connection_tenant_contracts(items.item_value)
+        ORDER BY items.ord
+      ),
+      '[]'::jsonb
+    )
     INTO output
-    FROM jsonb_array_elements(node) WITH ORDINALITY AS items(value, ord);
+    FROM jsonb_array_elements(node) WITH ORDINALITY AS items(item_value, ord);
     RETURN output;
   END IF;
 
@@ -59,9 +65,14 @@ BEGIN
   END IF;
 
   output := '{}'::jsonb;
-  FOR key, value IN SELECT * FROM jsonb_each(node)
+  FOR current_key, current_value IN
+    SELECT pairs.pair_key, pairs.pair_value
+    FROM jsonb_each(node) AS pairs(pair_key, pair_value)
   LOOP
-    output := output || jsonb_build_object(key, pg_temp.rewrite_connection_tenant_contracts(value));
+    output := output || jsonb_build_object(
+      current_key,
+      pg_temp.rewrite_connection_tenant_contracts(current_value)
+    );
   END LOOP;
 
   endpoint := output ->> 'endpoint';
