@@ -1,10 +1,23 @@
 import crypto from "node:crypto";
 import pg from "pg";
 import { evaluatePasswordStrength, hashPassword } from "../src/auth/password.js";
-import {
-  DEFAULT_BOOTSTRAP_PERMISSION_CODES,
-  normalizePermissionCodes,
-} from "./bootstrapPermissionProfile.mjs";
+
+const DEFAULT_BOOTSTRAP_PERMISSION_CODES = [
+  "OWNER_ADMIN_CONSOLE_READ",
+  "OWNER_ADMIN_ACCESS_READ",
+  "OWNER_ADMIN_SECURITY_READ",
+  "OWNER_ADMIN_SETTINGS_READ",
+  "OWNER_ADMIN_CONNECTION_READ",
+  "OWNER_ADMIN_CONNECTION_WRITE",
+  "OWNER_ADMIN_CONNECTION_SECRET_MANAGE",
+  "OWNER_ADMIN_CONNECTION_TEST",
+  "PROCESS_DEF_READ",
+  "CRM_PROCESS_DEF_READ",
+  "PROCESS_DEF_WRITE",
+  "CRM_PROCESS_DEF_WRITE",
+  "PROCESS_INSTANCE_READ",
+  "PROCESS_INSTANCE_WRITE",
+];
 
 function pick(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== "");
@@ -25,9 +38,16 @@ function isEmail(value) {
 
 function parsePermissionCodes(value) {
   const raw = normalize(value);
-  return normalizePermissionCodes(
-    raw.length > 0 ? raw.split(",") : DEFAULT_BOOTSTRAP_PERMISSION_CODES
-  );
+  const source = raw.length > 0 ? raw.split(",") : DEFAULT_BOOTSTRAP_PERMISSION_CODES;
+  const seen = new Set();
+  const output = [];
+  for (const candidate of source) {
+    const code = normalize(candidate).toUpperCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    output.push(code);
+  }
+  return output;
 }
 
 function assertUuid(value, label) {
