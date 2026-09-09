@@ -45,6 +45,21 @@ test("owner admin shell uses governed surface discovery and supports planning ic
   assert.doesNotMatch(shell, /owner-admin\/modules/);
 });
 
+test("owner admin shell visibly projects the authenticated organisation without owning tenant selection", () => {
+  const shell = read("apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx");
+  const login = read("apps/workbench-ui/src/components/shell/LoginPanel.jsx");
+
+  assert.match(shell, /Building2/);
+  assert.match(shell, /Current organisation:/);
+  assert.match(shell, /organisationLabel/);
+  assert.match(shell, /account\?\.tenant_name/);
+  assert.match(shell, /account\?\.tenant_code/);
+
+  assert.match(login, /resolveOrganisations/);
+  assert.match(login, /handleOrganisationChange/);
+  assert.doesNotMatch(shell, /setTenantId|handleTenantChange|selectTenant|tenantSelector/i);
+});
+
 test("owner admin navigation availability is metadata-driven", () => {
   const catalog = read("services/api/src/routes/ui_surface.js");
   const shell = read("apps/workbench-ui/src/components/shell/OwnerAdminShell.jsx");
