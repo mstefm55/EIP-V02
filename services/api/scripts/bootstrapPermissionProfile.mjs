@@ -1,0 +1,50 @@
+const DEFAULT_BOOTSTRAP_PERMISSION_CODES = Object.freeze([
+  "OWNER_ADMIN_CONSOLE_READ",
+  "OWNER_ADMIN_ACCESS_READ",
+  "OWNER_ADMIN_SECURITY_READ",
+  "OWNER_ADMIN_SETTINGS_READ",
+  "OWNER_ADMIN_CONNECTION_READ",
+  "OWNER_ADMIN_CONNECTION_WRITE",
+  "OWNER_ADMIN_CONNECTION_SECRET_MANAGE",
+  "OWNER_ADMIN_CONNECTION_TEST",
+  "PROCESS_DEF_READ",
+  "CRM_PROCESS_DEF_READ",
+  "PROCESS_DEF_WRITE",
+  "CRM_PROCESS_DEF_WRITE",
+  "PROCESS_INSTANCE_READ",
+  "PROCESS_INSTANCE_WRITE",
+]);
+
+function normalizePermissionCode(value) {
+  const code = String(value ?? "").trim().toUpperCase();
+  return code || null;
+}
+
+function normalizePermissionCodes(values) {
+  const source = Array.isArray(values) ? values : [];
+  const seen = new Set();
+  const output = [];
+
+  for (const value of source) {
+    const code = normalizePermissionCode(value);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    output.push(code);
+  }
+
+  return output;
+}
+
+function mergeBootstrapPermissionCodes(existingPermissions, requiredPermissions = DEFAULT_BOOTSTRAP_PERMISSION_CODES) {
+  return normalizePermissionCodes([
+    ...(Array.isArray(existingPermissions) ? existingPermissions : []),
+    ...(Array.isArray(requiredPermissions) ? requiredPermissions : []),
+  ]);
+}
+
+export {
+  DEFAULT_BOOTSTRAP_PERMISSION_CODES,
+  mergeBootstrapPermissionCodes,
+  normalizePermissionCode,
+  normalizePermissionCodes,
+};
