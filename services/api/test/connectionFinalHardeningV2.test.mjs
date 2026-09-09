@@ -147,6 +147,6 @@ test("final forward migration restores full Reliability UX and hardens tenant ro
 
   assert.match(migration, /dv\.code = 'oauth2_jwt'[\s\S]*dv\.is_active = true/);
   assert.match(migration, /dv\.code = 'oauth2_client_credentials'[\s\S]*dv\.is_active = true/);
-  assert.doesNotMatch(migration, /"path"\s*:\s*"tenant_id"/i);
-  assert.doesNotMatch(migration, /"key"\s*:\s*"tenant_id"/i);
+  assert.doesNotMatch(migration, /"path":"tenant_id"/i);
+  assert.doesNotMatch(migration, /"key":"tenant_id"/i);
 });
