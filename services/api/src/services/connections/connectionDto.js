@@ -166,15 +166,6 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
         timestamp_header: optionalText(verification.hmac_signature?.timestamp_header),
         max_skew_sec: finiteNumber(verification.hmac_signature?.max_skew_sec),
       },
-      oauth2_jwt: {
-        header_name: optionalText(verification.oauth2_jwt?.header_name),
-        token_prefix: optionalText(verification.oauth2_jwt?.token_prefix),
-        issuer: optionalText(verification.oauth2_jwt?.issuer),
-        audience: optionalText(verification.oauth2_jwt?.audience),
-        jwks_url: optionalText(verification.oauth2_jwt?.jwks_url),
-        max_skew_sec: finiteNumber(verification.oauth2_jwt?.max_skew_sec),
-        max_age_sec: finiteNumber(verification.oauth2_jwt?.max_age_sec),
-      },
     },
     idempotency: {
       event_id_location: optionalText(idempotency.event_id_location),

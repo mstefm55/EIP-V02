@@ -1,5 +1,9 @@
 import { validateInboundMappingConfig } from "./connectionInboundMapping.js";
 import { inspectInboundRateLimit } from "./connectionRateLimitPolicy.js";
+import {
+  isSupportedInboundHttpMethod,
+  isValidInboundSuffix,
+} from "./connectionInboundPolicy.js";
 
 const SUPPORTED_INBOUND_VERIFICATION_MODES = new Set(["none", "api_key", "hmac_signature"]);
 const SUPPORTED_IDEMPOTENCY_LOCATIONS = new Set(["header", "query", "body"]);
@@ -73,11 +77,25 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
     if (!inbound.webhook_enabled) {
       add("inbound.webhook_enabled", "ACTIVATION_INBOUND_DISABLED", "Inbound transport must be enabled before activating an inbound connection.");
     }
-    if (!text(inbound.inbound_path_suffix)) {
+    const inboundSuffix = text(inbound.inbound_path_suffix);
+    if (!inboundSuffix) {
       add("inbound.inbound_path_suffix", "ACTIVATION_INBOUND_PATH_REQUIRED", "Inbound path suffix is required before activation.");
+    } else if (!isValidInboundSuffix(inboundSuffix)) {
+      add(
+        "inbound.inbound_path_suffix",
+        "ACTIVATION_INBOUND_PATH_INVALID",
+        "Inbound path suffix must start with a letter or number and use only letters, numbers, underscore or hyphen (maximum 128 characters)."
+      );
     }
-    if (!text(inbound.http_method)) {
+    const inboundMethod = text(inbound.http_method).toUpperCase();
+    if (!inboundMethod) {
       add("inbound.http_method", "ACTIVATION_INBOUND_METHOD_REQUIRED", "Inbound HTTP method is required before activation.");
+    } else if (!isSupportedInboundHttpMethod(inboundMethod)) {
+      add(
+        "inbound.http_method",
+        "ACTIVATION_INBOUND_HTTP_METHOD_UNSUPPORTED",
+        "Live inbound Connections support POST, PUT or PATCH."
+      );
     }
     if (!text(inbound.expected_content_type)) {
       add("inbound.expected_content_type", "ACTIVATION_CONTENT_TYPE_REQUIRED", "Expected inbound content type is required before activation.");

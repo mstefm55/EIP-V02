@@ -8,6 +8,11 @@ import {
   requiredOutboundSecretKind,
 } from "./connectionActivation.js";
 import { validateInboundMappingConfig } from "./connectionInboundMapping.js";
+import {
+  isSupportedInboundHttpMethod,
+  isValidInboundSuffix,
+} from "./connectionInboundPolicy.js";
+import { inspectInboundRateLimit } from "./connectionRateLimitPolicy.js";
 
 const LIVE_INBOUND_MODES = SUPPORTED_INBOUND_VERIFICATION_MODES;
 
@@ -36,6 +41,7 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
   const mappingErrors = mappingMode === "mapped"
     ? validateInboundMappingConfig(profile, { requireMapped: true })
     : [];
+  const rateLimit = inspectInboundRateLimit(profile);
   const requiredSecretKind = requiredInboundSecretKind(profile);
   const activation = buildConnectionActivationStatus(profile, credentialStatuses);
 
@@ -52,13 +58,13 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
     },
     {
       code: "PATH_SUFFIX",
-      ok: Boolean(text(inbound.inbound_path_suffix)),
-      message: "Inbound path suffix is configured.",
+      ok: isValidInboundSuffix(inbound.inbound_path_suffix),
+      message: "Inbound path suffix is configured and valid for the live gateway.",
     },
     {
       code: "HTTP_METHOD",
-      ok: Boolean(text(inbound.http_method)),
-      message: "Inbound HTTP method is configured.",
+      ok: isSupportedInboundHttpMethod(inbound.http_method),
+      message: "Inbound HTTP method is supported by the live gateway (POST, PUT or PATCH).",
     },
     {
       code: "CONTENT_TYPE",
@@ -105,6 +111,13 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
       message: "Inbound idempotency scope is configured.",
     },
     {
+      code: "RATE_LIMIT",
+      ok: rateLimit.valid,
+      message: rateLimit.configured
+        ? "Inbound rate-limit max and window form a valid bounded pair."
+        : "Inbound rate limiting is optional and currently not configured.",
+    },
+    {
       code: "MAPPING_MODE",
       ok: SUPPORTED_MAPPING_MODES.has(mappingMode),
       message: "Inbound mapping mode is configured.",
@@ -120,7 +133,7 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
 
   const configured = checks.every((check) => check.ok);
   const liveMode = LIVE_INBOUND_MODES.has(verificationMode);
-  const runtimeAvailable = configured && liveMode;
+  const runtimeAvailable = configured && liveMode && activation.ready;
   const runtimeStatus = runtimeAvailable
     ? "AVAILABLE"
     : verificationMode && !liveMode

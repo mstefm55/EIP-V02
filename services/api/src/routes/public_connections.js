@@ -7,8 +7,12 @@ import {
 } from "../services/connections/connectionInboundRuntime.js";
 import { acceptInboundRequest } from "../services/connections/connectionInboundDispatch.js";
 import { enforceInboundRateLimit } from "../services/connections/connectionInboundRateLimit.js";
+import {
+  MAX_CONNECTION_BODY_BYTES,
+  SUPPORTED_INBOUND_HTTP_METHODS,
+} from "../services/connections/connectionInboundPolicy.js";
 
-const PUBLIC_METHODS = Object.freeze(["POST", "PUT", "PATCH"]);
+const PUBLIC_METHODS = SUPPORTED_INBOUND_HTTP_METHODS;
 
 function normalizeText(value) {
   return String(value ?? "").trim();
@@ -247,6 +251,7 @@ export default async function publicConnectionRoutes(app, options = {}) {
   app.route({
     method: [...PUBLIC_METHODS],
     url: "/api/public/gateway/intake/:tenantCode/:suffix",
+    bodyLimit: MAX_CONNECTION_BODY_BYTES,
     schema: { params: paramsSchema },
     handler: handleInbound,
   });
@@ -254,12 +259,14 @@ export default async function publicConnectionRoutes(app, options = {}) {
   app.route({
     method: [...PUBLIC_METHODS],
     url: "/api/edi/gateway/webhook/:tenantCode/:suffix",
+    bodyLimit: MAX_CONNECTION_BODY_BYTES,
     schema: { params: paramsSchema },
     handler: handleInbound,
   });
 }
 
 export {
+  MAX_CONNECTION_BODY_BYTES,
   PUBLIC_METHODS,
   assertChannelMatch,
   channelForRequest,
