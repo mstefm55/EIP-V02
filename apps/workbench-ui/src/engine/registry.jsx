@@ -4,6 +4,7 @@ import SplitLayout from "../components/primitives/SplitLayout.jsx";
 import Tabs from "../components/primitives/Tabs.jsx";
 import ContractDetailEditor from "../components/primitives/ContractDetailEditor.jsx";
 import ContractTablePanel from "../components/primitives/ContractTablePanel.jsx";
+import ContractSelectPanel from "../components/primitives/ContractSelectPanel.jsx";
 import ContractRecordEditor from "../components/primitives/ContractRecordEditor.jsx";
 import ContractMetricGrid from "../components/primitives/ContractMetricGrid.jsx";
 import ContractFlowStepEditor from "../components/primitives/ContractFlowStepEditor.jsx";
@@ -35,6 +36,10 @@ const primitiveLibrary = Object.freeze({
   ContractTablePanel: Object.freeze({
     component: ContractTablePanel,
     contract: "contract_table_panel_v1",
+  }),
+  ContractSelectPanel: Object.freeze({
+    component: ContractSelectPanel,
+    contract: "contract_select_panel_v1",
   }),
   ContractRecordEditor: Object.freeze({
     component: ContractRecordEditor,
