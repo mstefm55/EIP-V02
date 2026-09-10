@@ -1,5 +1,6 @@
 import { getConnectionProfile } from "./connectionProfile.js";
 import {
+  ConnectionOutboundRuntimeError,
   buildConnectionRequestPlan,
   executeConnectionRequest,
   publicRequestPlan,
@@ -59,11 +60,11 @@ async function planGovernedConnectionRequest({
     services
   );
   if (!profile || profile.setting_status === "deprecated") {
-    const error = new Error("Connection profile was not found.");
-    error.name = "ConnectionOutboundRuntimeError";
-    error.code = "CONNECTION_NOT_FOUND";
-    error.status = 404;
-    throw error;
+    throw new ConnectionOutboundRuntimeError(
+      "Connection profile was not found.",
+      "CONNECTION_NOT_FOUND",
+      404
+    );
   }
   const plan = buildConnectionRequestPlan(profile, request);
   return {
