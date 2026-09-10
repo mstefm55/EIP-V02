@@ -60,6 +60,11 @@ function isForbiddenSecretValueKey(key, value) {
   return false;
 }
 
+function isPersistedHeaderContainer(path) {
+  const compact = compactKey(path);
+  return compact.endsWith("defaultheaders") || compact.endsWith("tokenheaders");
+}
+
 function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
   if (depth > 20) {
     throw new ConnectionInputPolicyError(
@@ -129,7 +134,7 @@ function assertConnectionProfileInputSafe(value, path = "profile", depth = 0) {
       );
     }
 
-    if (compactPath.endsWith("defaultheaders") && FORBIDDEN_HEADER_KEYS.has(compact)) {
+    if (isPersistedHeaderContainer(path) && FORBIDDEN_HEADER_KEYS.has(compact)) {
       throw new ConnectionInputPolicyError(
         "Sensitive authentication headers must not be persisted in connection profile metadata.",
         "CONNECTION_SENSITIVE_HEADER_FORBIDDEN",
@@ -147,4 +152,5 @@ export {
   ConnectionInputPolicyError,
   assertConnectionProfileInputSafe,
   isForbiddenSecretValueKey,
+  isPersistedHeaderContainer,
 };
