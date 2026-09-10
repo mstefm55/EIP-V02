@@ -12,6 +12,7 @@ const FIELD_TYPES = new Set([
   "string_list",
   "json_object",
 ]);
+const CREATE_PREVIEW_TRANSFORMS = new Set(["slug"]);
 
 function normalizeText(value) {
   return String(value ?? "").trim();
@@ -25,6 +26,46 @@ function safePathSegments(path) {
     if (!/^[A-Za-z0-9_:-]{1,80}$/.test(segment)) return null;
   }
   return segments;
+}
+
+function normalizeBoundedInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeCreatePreview(rawPreview) {
+  if (!rawPreview || typeof rawPreview !== "object" || Array.isArray(rawPreview)) return null;
+  const sourceKey = normalizeText(rawPreview.source_key);
+  if (!FIELD_KEY_PATTERN.test(sourceKey) || FORBIDDEN_KEYS.has(sourceKey)) return null;
+  const transform = normalizeText(rawPreview.transform).toLowerCase();
+  if (!CREATE_PREVIEW_TRANSFORMS.has(transform)) return null;
+
+  return {
+    source_key: sourceKey,
+    transform,
+    fallback: normalizeText(rawPreview.fallback).slice(0, 80),
+    min_length: normalizeBoundedInteger(rawPreview.min_length, 0, 0, 80),
+    short_suffix: normalizeText(rawPreview.short_suffix).slice(0, 80),
+    max_length: normalizeBoundedInteger(rawPreview.max_length, 80, 1, 256),
+  };
+}
+
+function resolveSlugCreatePreview(rawValue, preview) {
+  const source = String(rawValue ?? "").trim();
+  if (!source) return "";
+
+  let base = source
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (!base) return preview.fallback.slice(0, preview.max_length);
+  if (preview.min_length > 0 && base.length < preview.min_length && preview.short_suffix) {
+    base = `${base}${preview.short_suffix}`;
+  }
+
+  return base.slice(0, preview.max_length).replace(/-+$/g, "") || preview.fallback.slice(0, preview.max_length);
 }
 
 export function getSafePath(source, path) {
@@ -98,6 +139,7 @@ export function normalizeStepEditorField(rawField) {
     read_only: rawField.read_only === true,
     disabled_on_create: rawField.disabled_on_create === true,
     hide_on_create: rawField.hide_on_create === true,
+    create_preview: normalizeCreatePreview(rawField.create_preview),
   };
 }
 
@@ -133,6 +175,16 @@ export function resolveStepEditorFieldOptions(field, optionsPayload) {
     });
   }
   return options.length > 0 ? options : field.options || [];
+}
+
+export function resolveStepEditorCreatePreview(field, draft) {
+  const preview = field?.create_preview;
+  if (!preview) return undefined;
+  const sourceValue = draft?.[preview.source_key];
+  if (preview.transform === "slug") {
+    return resolveSlugCreatePreview(sourceValue, preview);
+  }
+  return undefined;
 }
 
 function normalizeStringList(value) {
