@@ -4,6 +4,7 @@ import { validateConnectionActivation } from "./connectionActivation.js";
 
 const PROFILE_KEY_PREFIX = "connection.profile.";
 const CONNECTION_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,63}$/;
+const MAX_CONNECTION_CODE_ALLOCATION_ATTEMPTS = 10000;
 const PROHIBITED_SECRET_KEYS = new Set([
   "secret",
   "client_secret",
@@ -92,6 +93,29 @@ function normalizeConnectionCode(value) {
   return code;
 }
 
+// Preserve the V1 Admin Connections convention: the connection name becomes a
+// lowercase slug prefix and duplicate names receive a numeric suffix (-2, -3,
+// ...). Allocation remains server-side so concurrent creates cannot race into
+// the same tenant-scoped setting key.
+function buildConnectionCodeBase(value) {
+  const normalized = text(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = !normalized ? "conn" : normalized.length < 3 ? `${normalized}-conn` : normalized;
+  return base.slice(0, 64).replace(/-+$/g, "") || "conn";
+}
+
+function buildConnectionCodeCandidate(value, serial = 1) {
+  const base = buildConnectionCodeBase(value);
+  const normalizedSerial = Number.isInteger(serial) && serial > 1 ? serial : 1;
+  if (normalizedSerial === 1) return normalizeConnectionCode(base);
+
+  const suffix = `-${normalizedSerial}`;
+  const prefix = base.slice(0, Math.max(3, 64 - suffix.length)).replace(/-+$/g, "") || "conn";
+  return normalizeConnectionCode(`${prefix}${suffix}`);
+}
+
 function profileKey(connectionCode) {
   return `${PROFILE_KEY_PREFIX}${normalizeConnectionCode(connectionCode)}`;
 }
@@ -126,9 +150,13 @@ function normalizeProfile(input, existing = null) {
   const previous = existing && typeof existing === "object" ? existing : {};
   const identitySource = source.identity && typeof source.identity === "object" ? source.identity : {};
   const previousIdentity = previous.identity && typeof previous.identity === "object" ? previous.identity : {};
-  const connectionCode = normalizeConnectionCode(
+  const connectionName = text(identitySource.connection_name ?? previousIdentity.connection_name);
+  const requestedConnectionCode = text(
     identitySource.connection_code || previousIdentity.connection_code || source.connection_code
   );
+  const connectionCode = requestedConnectionCode
+    ? normalizeConnectionCode(requestedConnectionCode)
+    : buildConnectionCodeCandidate(connectionName, 1);
 
   const inboundSource = source.inbound && typeof source.inbound === "object" ? source.inbound : {};
   const verificationSource = source.verification && typeof source.verification === "object" ? source.verification : {};
@@ -149,7 +177,7 @@ function normalizeProfile(input, existing = null) {
   return {
     profile_version: 1,
     identity: {
-      connection_name: text(identitySource.connection_name ?? previousIdentity.connection_name),
+      connection_name: connectionName,
       connection_code: connectionCode,
       connection_kind: text(identitySource.connection_kind ?? previousIdentity.connection_kind),
       direction: text(identitySource.direction ?? previousIdentity.direction),
@@ -522,8 +550,18 @@ async function getConnectionProfile(pool, tenantId, connectionCode) {
 }
 
 async function createConnectionProfile(pool, tenantId, input, taxonomy) {
-  const profile = normalizeProfile(input);
-  if (profile.identity.is_enabled === true) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const identity = source.identity && typeof source.identity === "object" ? source.identity : {};
+  const connectionName = text(identity.connection_name ?? source.connection_name);
+  const initialProfile = normalizeProfile({
+    ...source,
+    identity: {
+      ...identity,
+      connection_code: buildConnectionCodeCandidate(connectionName, 1),
+    },
+  });
+
+  if (initialProfile.identity.is_enabled === true) {
     throw new ConnectionProfileError(
       "New connections must be created as disabled drafts before activation.",
       "CONNECTION_ACTIVATION_REQUIRES_DRAFT",
@@ -537,29 +575,46 @@ async function createConnectionProfile(pool, tenantId, input, taxonomy) {
       ]
     );
   }
-  const errors = validateConnectionProfile(profile, taxonomy, { requireComplete: false });
+
+  const errors = validateConnectionProfile(initialProfile, taxonomy, { requireComplete: false });
   if (errors.length) {
     throw new ConnectionProfileError("Connection profile validation failed.", "CONNECTION_PROFILE_INVALID", 400, errors);
   }
-  const key = profileKey(profile.identity.connection_code);
-  const settingStatus = "disabled";
 
+  const settingStatus = "disabled";
   return withTenantTransaction(pool, tenantId, async (client) => {
-    const result = await client.query(
-      `
-      INSERT INTO tenant.tenant_settings
-        (tenant_setting_id, tenant_id, setting_key, setting_value, setting_status, created_at, updated_at)
-      VALUES
-        ($1::uuid, $2::uuid, $3, $4::jsonb, $5, now(), now())
-      ON CONFLICT (tenant_id, setting_key) DO NOTHING
-      RETURNING tenant_setting_id, setting_key, setting_value, setting_status, created_at, updated_at
-      `,
-      [crypto.randomUUID(), tenantId, key, JSON.stringify(profile), settingStatus]
-    );
-    if (result.rowCount !== 1) {
-      throw new ConnectionProfileError("Connection code already exists.", "CONNECTION_ALREADY_EXISTS", 409);
+    for (let serial = 1; serial <= MAX_CONNECTION_CODE_ALLOCATION_ATTEMPTS; serial += 1) {
+      const candidateCode = buildConnectionCodeCandidate(connectionName, serial);
+      const candidateProfile = serial === 1
+        ? initialProfile
+        : normalizeProfile({
+            ...source,
+            identity: {
+              ...identity,
+              connection_code: candidateCode,
+              is_enabled: false,
+            },
+          });
+      const key = profileKey(candidateCode);
+      const result = await client.query(
+        `
+        INSERT INTO tenant.tenant_settings
+          (tenant_setting_id, tenant_id, setting_key, setting_value, setting_status, created_at, updated_at)
+        VALUES
+          ($1::uuid, $2::uuid, $3, $4::jsonb, $5, now(), now())
+        ON CONFLICT (tenant_id, setting_key) DO NOTHING
+        RETURNING tenant_setting_id, setting_key, setting_value, setting_status, created_at, updated_at
+        `,
+        [crypto.randomUUID(), tenantId, key, JSON.stringify(candidateProfile), settingStatus]
+      );
+      if (result.rowCount === 1) return rowToProfile(result.rows[0]);
     }
-    return rowToProfile(result.rows[0]);
+
+    throw new ConnectionProfileError(
+      "Unable to allocate a unique connection code for this tenant.",
+      "CONNECTION_CODE_ALLOCATION_EXHAUSTED",
+      409
+    );
   });
 }
 
@@ -668,6 +723,8 @@ export {
   CONNECTION_CODE_PATTERN,
   PROFILE_KEY_PREFIX,
   ConnectionProfileError,
+  buildConnectionCodeBase,
+  buildConnectionCodeCandidate,
   createConnectionProfile,
   getConnectionProfile,
   listConnectionProfiles,
