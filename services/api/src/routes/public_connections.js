@@ -78,14 +78,21 @@ function dispatchMessage(status) {
 }
 
 export default async function publicConnectionRoutes(app, options = {}) {
+  const serviceOverrides = options.services || {};
+  const verifier = serviceOverrides.verifyGovernedInboundRequest
+    || serviceOverrides.verifyInboundRequest
+    || verifyGovernedInboundRequest;
   const deps = {
     resolvePublicConnection,
     assertInboundRequestAllowed,
     enforceInboundRateLimit,
-    verifyGovernedInboundRequest,
+    verifyGovernedInboundRequest: verifier,
     acceptInboundRequest,
-    ...(options.services || {}),
+    ...serviceOverrides,
   };
+  // `verifyInboundRequest` was the historical injection seam. Do not let its
+  // compatibility key replace the governed dependency name after spreading.
+  deps.verifyGovernedInboundRequest = verifier;
 
   configureRawBodyParser(app);
 
