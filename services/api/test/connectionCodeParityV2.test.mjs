@@ -13,16 +13,14 @@ const TAXONOMY = Object.freeze({
   CONNECTION_ENVIRONMENT: [{ code: "sandbox" }],
 });
 
-test("connection codes preserve the V1 name-prefix and numeric-suffix convention", () => {
-  assert.equal(buildConnectionCodeBase("My Website"), "my-website");
-  assert.equal(buildConnectionCodeCandidate("My Website", 1), "my-website");
-  assert.equal(buildConnectionCodeCandidate("My Website", 2), "my-website-2");
-  assert.equal(buildConnectionCodeCandidate("My Website", 3), "my-website-3");
-  assert.equal(buildConnectionCodeBase("A"), "a-conn");
-  assert.equal(buildConnectionCodeBase("  Portal / EU !!!  "), "portal-eu");
+test("connection codes use the V1 conn prefix plus serial protocol and never derive from the name", () => {
+  assert.equal(buildConnectionCodeBase("My Website"), "conn");
+  assert.equal(buildConnectionCodeCandidate("My Website", 1), "conn-1");
+  assert.equal(buildConnectionCodeCandidate("Anything Else", 2), "conn-2");
+  assert.equal(buildConnectionCodeCandidate("test 4", 3), "conn-3");
 });
 
-test("server ignores browser connection_code and retries the next serial on tenant collision", async () => {
+test("server ignores browser connection_code and retries the next V1 serial on tenant collision", async () => {
   const inserts = [];
   let insertAttempt = 0;
 
@@ -79,11 +77,12 @@ test("server ignores browser connection_code and retries the next serial on tena
   );
 
   assert.equal(inserts.length, 2);
-  assert.equal(inserts[0].key, "connection.profile.acme-portal");
-  assert.equal(inserts[0].profile.identity.connection_code, "acme-portal");
-  assert.equal(inserts[1].key, "connection.profile.acme-portal-2");
-  assert.equal(inserts[1].profile.identity.connection_code, "acme-portal-2");
-  assert.equal(created.identity.connection_code, "acme-portal-2");
+  assert.equal(inserts[0].key, "connection.profile.conn-1");
+  assert.equal(inserts[0].profile.identity.connection_code, "conn-1");
+  assert.equal(inserts[1].key, "connection.profile.conn-2");
+  assert.equal(inserts[1].profile.identity.connection_code, "conn-2");
+  assert.equal(created.identity.connection_code, "conn-2");
+  assert.equal(created.identity.connection_name, "Acme Portal");
   assert.equal(created.identity.is_enabled, false);
   assert.equal(created.setting_status, "disabled");
 });

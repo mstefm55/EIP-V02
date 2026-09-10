@@ -93,27 +93,15 @@ function normalizeConnectionCode(value) {
   return code;
 }
 
-// Preserve the V1 Admin Connections convention: the connection name becomes a
-// lowercase slug prefix and duplicate names receive a numeric suffix (-2, -3,
-// ...). Allocation remains server-side so concurrent creates cannot race into
-// the same tenant-scoped setting key.
-function buildConnectionCodeBase(value) {
-  const normalized = text(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  const base = !normalized ? "conn" : normalized.length < 3 ? `${normalized}-conn` : normalized;
-  return base.slice(0, 64).replace(/-+$/g, "") || "conn";
+// V1 created Connection record identifiers with a fixed `conn-` prefix and a
+// serial number. Keep that protocol independent from the human Connection name.
+function buildConnectionCodeBase() {
+  return "conn";
 }
 
-function buildConnectionCodeCandidate(value, serial = 1) {
-  const base = buildConnectionCodeBase(value);
-  const normalizedSerial = Number.isInteger(serial) && serial > 1 ? serial : 1;
-  if (normalizedSerial === 1) return normalizeConnectionCode(base);
-
-  const suffix = `-${normalizedSerial}`;
-  const prefix = base.slice(0, Math.max(3, 64 - suffix.length)).replace(/-+$/g, "") || "conn";
-  return normalizeConnectionCode(`${prefix}${suffix}`);
+function buildConnectionCodeCandidate(_value, serial = 1) {
+  const normalizedSerial = Number.isInteger(serial) && serial > 0 ? serial : 1;
+  return normalizeConnectionCode(`${buildConnectionCodeBase()}-${normalizedSerial}`);
 }
 
 function profileKey(connectionCode) {
