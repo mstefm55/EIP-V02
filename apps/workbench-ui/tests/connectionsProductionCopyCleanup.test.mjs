@@ -12,11 +12,11 @@ const migrationPath = path.resolve(
 const source = fs.readFileSync(migrationPath, "utf8");
 
 test("Connections final surface hides the generated code until the draft exists", () => {
-  assert.match(source, /fields\.field - 'create_preview' - 'help'/);
+  assert.match(source, /fields\.field - 'create_preview' - 'help' - 'immutable_after_create'/);
   assert.match(source, /'hide_on_create', true/);
   assert.match(source, /'read_only', true/);
-  assert.match(source, /'immutable_after_create', true/);
   assert.match(source, /'Assigned automatically'/);
+  assert.match(source, /exists\(@\.immutable_after_create\)/);
 });
 
 test("Connections final surface replaces implementation copy with concise product copy", () => {
@@ -35,13 +35,16 @@ test("Connections final surface replaces implementation copy with concise produc
   }
 
   for (const removed of [
-    "V1 naming protocol",
+    "v1 naming protocol",
     "server-authorized",
     "tenant-scoped",
     "control plane",
-    "write-only credentials",
-    "server-side probe",
+    "write-only credential",
+    "server-side",
     "governed auth",
+    "validated by the server",
+    "server readiness",
+    "browser override",
   ]) {
     assert.ok(
       source.includes(`surface_text LIKE '%${removed}%`),
@@ -50,10 +53,11 @@ test("Connections final surface replaces implementation copy with concise produc
   }
 });
 
-test("Connections create screen removes activation and code implementation help", () => {
+test("Connections create screen removes activation/code helper commentary", () => {
   assert.match(source, /WHEN fields\.field ->> 'key' = 'connection_code'/);
-  assert.match(source, /fields\.field - 'create_preview' - 'help'/);
+  assert.match(source, /fields\.field - 'create_preview' - 'help' - 'immutable_after_create'/);
   assert.match(source, /WHEN fields\.field ->> 'key' = 'is_enabled'/);
   assert.match(source, /fields\.field - 'help'/);
   assert.match(source, /output := output #- '\{props,create_mode_message\}'/);
+  assert.match(source, /output := output #- '\{props,create_mode_title\}'/);
 });
