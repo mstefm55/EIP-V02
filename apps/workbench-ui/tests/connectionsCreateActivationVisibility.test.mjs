@@ -25,5 +25,7 @@ test("connection metadata hides Enabled during draft creation and restores it af
   assert.match(migration, /'default_value', false/);
   assert.match(migration, /fields\.field - 'disabled_on_create'/);
   assert.match(migration, /Activation is available after the disabled draft is created/);
-  assert.doesNotMatch(migration, /"tenant_id"/);
+  // The migration must actively fail if browser-owned tenant_id metadata appears
+  // on the rendered surface; this guard is evidence of tenant safety, not a leak.
+  assert.match(migration, /surface_tree::text LIKE '%\"tenant_id\"%'/);
 });
