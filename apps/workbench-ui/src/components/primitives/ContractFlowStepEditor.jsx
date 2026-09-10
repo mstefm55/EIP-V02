@@ -324,7 +324,9 @@ function ContractFlowStepEditor({ node, ctx }) {
     const errorMessage = fieldErrors[field.key] || null;
     const fieldOptions = resolveStepEditorFieldOptions(field, optionsPayload);
     const immutable = !createMode && field.immutable_after_create;
-    const disabled = !canAuthor || saving || immutable;
+    const createDisabled = createMode && field.disabled_on_create;
+    const disabled = !canAuthor || saving || immutable || createDisabled;
+    const readOnly = field.read_only === true;
 
     if (field.type === "checkbox") {
       return (
@@ -333,7 +335,7 @@ function ContractFlowStepEditor({ node, ctx }) {
             type="checkbox"
             checked={value === true}
             onChange={(event) => patchDraft(field.key, event.target.checked)}
-            disabled={disabled}
+            disabled={disabled || readOnly}
           />
           <span>
             <strong>{field.label}</strong>
@@ -346,7 +348,7 @@ function ContractFlowStepEditor({ node, ctx }) {
     return (
       <label key={field.key} className="contract-flow-step-editor__field">
         <span className="contract-flow-step-editor__field-label">
-          {field.label}{field.required ? " *" : ""}
+          {field.label}{field.required && !readOnly ? " *" : ""}
         </span>
         {isMultilineField(field.type) ? (
           <textarea
@@ -355,13 +357,14 @@ function ContractFlowStepEditor({ node, ctx }) {
             placeholder={field.placeholder}
             onChange={(event) => patchDraft(field.key, event.target.value)}
             disabled={disabled}
+            readOnly={readOnly}
             aria-invalid={Boolean(errorMessage)}
           />
         ) : field.type === "select" ? (
           <select
             value={value}
             onChange={(event) => patchDraft(field.key, event.target.value)}
-            disabled={disabled || optionsLoading}
+            disabled={disabled || readOnly || optionsLoading}
             aria-invalid={Boolean(errorMessage)}
           >
             <option value="">{optionsLoading ? "Loading options..." : field.placeholder || "Select..."}</option>
@@ -380,6 +383,7 @@ function ContractFlowStepEditor({ node, ctx }) {
               patchDraft(field.key, nextValue);
             }}
             disabled={disabled}
+            readOnly={readOnly}
             autoComplete={field.type === "password" ? "new-password" : undefined}
             aria-invalid={Boolean(errorMessage)}
           />
