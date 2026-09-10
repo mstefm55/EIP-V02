@@ -68,6 +68,8 @@ function requestInputSchema() {
       accept: { type: "string", maxLength: 255 },
       response_encoding: { type: "string", enum: [...SUPPORTED_RESPONSE_ENCODINGS] },
       idempotency_key: { type: "string", maxLength: 255 },
+      tenant_id: false,
+      tenantId: false,
     },
   };
 }
