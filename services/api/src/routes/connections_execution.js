@@ -5,8 +5,8 @@ import {
   SUPPORTED_BODY_ENCODINGS,
   SUPPORTED_OUTBOUND_METHODS,
   SUPPORTED_RESPONSE_ENCODINGS,
-  planConnectionRequest,
 } from "../services/connections/connectionOutboundRuntime.js";
+import { planGovernedConnectionRequest } from "../services/connections/connectionExecutionProfile.js";
 import { SUPPORTED_PROVIDER_SIGNATURES } from "../services/connections/connectionProviderVerification.js";
 import { resolveConnectionTargetTenant } from "../services/connections/connectionTargetTenant.js";
 import { TEST_PERMISSIONS, READ_PERMISSIONS } from "./connections.js";
@@ -104,6 +104,7 @@ function capabilityProjection() {
       auth_mode: "outbound.auth_mode",
       auth_metadata: "outbound.auth",
       request_defaults: "attrs.outbound_request",
+      oauth_client_credentials: "attrs.oauth_client_credentials",
       provider_signature: "attrs.provider_signature",
     },
     limits: {
@@ -130,7 +131,7 @@ function mapExecutionError(error) {
 
 export default async function connectionExecutionRoutes(app, options = {}) {
   const deps = {
-    planConnectionRequest,
+    planGovernedConnectionRequest,
     resolveConnectionTargetTenant,
     ...(options.services || {}),
   };
@@ -148,7 +149,7 @@ export default async function connectionExecutionRoutes(app, options = {}) {
       const session = await requirePermission(app, req, reply, TEST_PERMISSIONS, { csrf: true });
       if (!session) return;
       try {
-        const result = await deps.planConnectionRequest({
+        const result = await deps.planGovernedConnectionRequest({
           pool: app.db,
           tenantId: session.tenant_id,
           connectionCode: req.params.code,
@@ -174,7 +175,7 @@ export default async function connectionExecutionRoutes(app, options = {}) {
       try {
         const target = await deps.resolveConnectionTargetTenant(app.db, req.params.tenantCode);
         if (!target?.id) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
-        const result = await deps.planConnectionRequest({
+        const result = await deps.planGovernedConnectionRequest({
           pool: app.db,
           tenantId: target.id,
           connectionCode: req.params.code,
