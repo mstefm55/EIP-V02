@@ -5,6 +5,7 @@ import {
   normalizeStepEditorField,
   normalizeStepEditorFields,
   patchRecordFromStepDraft,
+  resolveStepEditorCreatePreview,
   validateStepEditorDraft,
 } from "../src/components/primitives/contractStepEditorModel.js";
 
@@ -50,6 +51,69 @@ test("read-only generated fields cannot be injected into create payloads", () =>
 
   assert.equal(payload.identity.connection_name, "Acme Portal");
   assert.equal(Object.prototype.hasOwnProperty.call(payload.identity, "connection_code"), false);
+});
+
+test("generic create preview reproduces the V1 Connection code slug protocol", () => {
+  const field = normalizeStepEditorField({
+    key: "connection_code",
+    path: "identity.connection_code",
+    label: "Connection code",
+    read_only: true,
+    create_preview: {
+      source_key: "connection_name",
+      transform: "slug",
+      fallback: "conn",
+      min_length: 3,
+      short_suffix: "-conn",
+      max_length: 64,
+    },
+  });
+
+  assert.deepEqual(field.create_preview, {
+    source_key: "connection_name",
+    transform: "slug",
+    fallback: "conn",
+    min_length: 3,
+    short_suffix: "-conn",
+    max_length: 64,
+  });
+  assert.equal(resolveStepEditorCreatePreview(field, { connection_name: "My Website" }), "my-website");
+  assert.equal(resolveStepEditorCreatePreview(field, { connection_name: "  Portal / EU !!!  " }), "portal-eu");
+  assert.equal(resolveStepEditorCreatePreview(field, { connection_name: "A" }), "a-conn");
+  assert.equal(resolveStepEditorCreatePreview(field, { connection_name: "***" }), "conn");
+  assert.equal(resolveStepEditorCreatePreview(field, { connection_name: "" }), "");
+});
+
+test("create preview remains display-only and cannot become browser code authority", () => {
+  const fields = normalizeStepEditorFields([
+    {
+      key: "connection_name",
+      path: "identity.connection_name",
+      label: "Connection name",
+      required: true,
+    },
+    {
+      key: "connection_code",
+      path: "identity.connection_code",
+      label: "Connection code",
+      read_only: true,
+      omit_empty: true,
+      create_preview: {
+        source_key: "connection_name",
+        transform: "slug",
+        fallback: "conn",
+        min_length: 3,
+        short_suffix: "-conn",
+        max_length: 64,
+      },
+    },
+  ]);
+  const codeField = fields.find((field) => field.key === "connection_code");
+  const draft = { connection_name: "Acme Portal", connection_code: "" };
+
+  assert.equal(resolveStepEditorCreatePreview(codeField, draft), "acme-portal");
+  const payload = patchRecordFromStepDraft({}, draft, fields, { isCreate: true });
+  assert.deepEqual(payload, { identity: { connection_name: "Acme Portal" } });
 });
 
 test("activation fields can be hidden only during creation", () => {
