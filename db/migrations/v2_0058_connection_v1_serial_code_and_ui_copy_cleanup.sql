@@ -5,6 +5,10 @@ BEGIN;
 -- - new Connection codes are allocated by the API with the V1 `conn-<serial>` pattern;
 -- - the code is not shown until the draft exists;
 -- - implementation/security commentary is removed from the production surface.
+--
+-- This migration previously failed its own validation in Railway and therefore
+-- never committed. The corrected form below is still the first applicable
+-- v2_0058 and remains forward-only from the database point of view.
 
 DO $$
 DECLARE
@@ -30,6 +34,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   node_kind text;
+  scalar_text text;
   object_key text;
   object_value jsonb;
   output jsonb;
@@ -42,6 +47,25 @@ BEGIN
   END IF;
 
   node_kind := jsonb_typeof(node);
+
+  IF node_kind = 'string' THEN
+    scalar_text := node #>> '{}';
+    IF lower(scalar_text) LIKE '%v1 naming protocol%'
+       OR lower(scalar_text) LIKE '%server-authorized%'
+       OR lower(scalar_text) LIKE '%server allocates%'
+       OR lower(scalar_text) LIKE '%tenant-scoped%'
+       OR lower(scalar_text) LIKE '%control plane%'
+       OR lower(scalar_text) LIKE '%write-only credential%'
+       OR lower(scalar_text) LIKE '%server-side%'
+       OR lower(scalar_text) LIKE '%governed auth%'
+       OR lower(scalar_text) LIKE '%validated by the server%'
+       OR lower(scalar_text) LIKE '%server readiness%'
+       OR lower(scalar_text) LIKE '%browser override%'
+    THEN
+      RETURN '""'::jsonb;
+    END IF;
+    RETURN node;
+  END IF;
 
   IF node_kind = 'array' THEN
     SELECT COALESCE(
@@ -112,11 +136,10 @@ BEGIN
       jsonb_agg(
         CASE
           WHEN fields.field ->> 'key' = 'connection_code' THEN
-            (fields.field - 'create_preview' - 'help') || jsonb_build_object(
+            (fields.field - 'create_preview' - 'help' - 'immutable_after_create') || jsonb_build_object(
               'required', false,
               'read_only', true,
               'omit_empty', true,
-              'immutable_after_create', true,
               'hide_on_create', true,
               'placeholder', 'Assigned automatically'
             )
@@ -134,8 +157,8 @@ BEGIN
 
     output := jsonb_set(output, '{props,fields}', rewritten_fields, true);
     output := jsonb_set(output, '{props,new_record_template,identity,is_enabled}', 'false'::jsonb, true);
-    output := jsonb_set(output, '{props,create_mode_title}', to_jsonb('New connection'::text), true);
     output := output #- '{props,create_mode_message}';
+    output := output #- '{props,create_mode_title}';
   END IF;
 
   RETURN output;
@@ -155,7 +178,7 @@ DECLARE
   surface_tree jsonb;
   surface_text text;
 BEGIN
-  SELECT tree, tree::text
+  SELECT tree, lower(tree::text)
   INTO surface_tree, surface_text
   FROM eip_core.ui_surface
   WHERE tenant_id IS NULL
@@ -167,17 +190,23 @@ BEGIN
      OR surface_tree #>> '{props,composition}' <> 'connection_setup_v2'
      OR NOT jsonb_path_exists(
        surface_tree,
-       '$.** ? (@.key == "connection_code" && @.read_only == true && @.immutable_after_create == true && @.hide_on_create == true)'
+       '$.** ? (@.key == "connection_code" && @.read_only == true && @.hide_on_create == true)'
      )
      OR jsonb_path_exists(surface_tree, '$.** ? (@.key == "connection_code" && exists(@.create_preview))')
-     OR surface_text LIKE '%V1 naming protocol%'
-     OR surface_text LIKE '%server allocates%'
+     OR jsonb_path_exists(surface_tree, '$.** ? (@.key == "connection_code" && exists(@.help))')
+     OR jsonb_path_exists(surface_tree, '$.** ? (@.key == "connection_code" && exists(@.immutable_after_create))')
+     OR jsonb_path_exists(surface_tree, '$.** ? (@.key == "is_enabled" && exists(@.help))')
+     OR surface_text LIKE '%v1 naming protocol%'
      OR surface_text LIKE '%server-authorized%'
+     OR surface_text LIKE '%server allocates%'
      OR surface_text LIKE '%tenant-scoped%'
      OR surface_text LIKE '%control plane%'
-     OR surface_text LIKE '%write-only credentials%'
-     OR surface_text LIKE '%server-side probe%'
+     OR surface_text LIKE '%write-only credential%'
+     OR surface_text LIKE '%server-side%'
      OR surface_text LIKE '%governed auth%'
+     OR surface_text LIKE '%validated by the server%'
+     OR surface_text LIKE '%server readiness%'
+     OR surface_text LIKE '%browser override%'
   THEN
     RAISE EXCEPTION 'v2_0058 Connections serial-code/UI-copy validation failed';
   END IF;
