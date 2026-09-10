@@ -6,6 +6,7 @@ import {
   getSafePath,
   normalizeStepEditorFields,
   patchRecordFromStepDraft,
+  resolveStepEditorCreatePreview,
   resolveStepEditorFieldOptions,
   validateStepEditorDraft,
 } from "./contractStepEditorModel.js";
@@ -321,7 +322,10 @@ function ContractFlowStepEditor({ node, ctx }) {
   ]);
 
   function renderField(field) {
-    const value = draft?.[field.key] ?? (field.type === "checkbox" ? false : "");
+    const createPreview = createMode ? resolveStepEditorCreatePreview(field, draft) : undefined;
+    const value = createPreview !== undefined
+      ? createPreview
+      : draft?.[field.key] ?? (field.type === "checkbox" ? false : "");
     const errorMessage = fieldErrors[field.key] || null;
     const fieldOptions = resolveStepEditorFieldOptions(field, optionsPayload);
     const immutable = !createMode && field.immutable_after_create;
