@@ -6,6 +6,14 @@ import {
   publicRequestPlan,
 } from "./connectionOutboundRuntime.js";
 
+const SENSITIVE_EXECUTION_RESPONSE_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "set-cookie",
+  "cookie",
+]);
+
 function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -38,6 +46,16 @@ function effectiveConnectionRuntimeProfile(profile) {
       },
     },
   };
+}
+
+function sanitizeExecutionResult(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const headers = {};
+  for (const [key, value] of Object.entries(plainObject(result.headers))) {
+    if (SENSITIVE_EXECUTION_RESPONSE_HEADERS.has(String(key).toLowerCase())) continue;
+    headers[key] = value;
+  }
+  return { ...result, headers };
 }
 
 async function loadEffectiveConnectionRuntimeProfile(pool, tenantId, connectionCode, services = {}) {
@@ -93,7 +111,7 @@ async function executeGovernedConnectionRequest({
     ...services,
     getConnectionProfile: async () => profile,
   };
-  return executeConnectionRequest({
+  const result = await executeConnectionRequest({
     pool,
     tenantId,
     connectionCode,
@@ -102,11 +120,14 @@ async function executeGovernedConnectionRequest({
     requireEnabled,
     services: lowerLevelServices,
   });
+  return sanitizeExecutionResult(result);
 }
 
 export {
+  SENSITIVE_EXECUTION_RESPONSE_HEADERS,
   effectiveConnectionRuntimeProfile,
   executeGovernedConnectionRequest,
   loadEffectiveConnectionRuntimeProfile,
   planGovernedConnectionRequest,
+  sanitizeExecutionResult,
 };
