@@ -1,3 +1,4 @@
+import { OutboundHttpPolicyError } from "../security/outboundHttpPolicy.js";
 import {
   ConnectionOutboundRuntimeError,
   MAX_REQUEST_BODY_BYTES,
@@ -6,7 +7,10 @@ import {
   SUPPORTED_OUTBOUND_METHODS,
   SUPPORTED_RESPONSE_ENCODINGS,
 } from "../services/connections/connectionOutboundRuntime.js";
-import { planGovernedConnectionRequest } from "../services/connections/connectionExecutionProfile.js";
+import {
+  executeGovernedConnectionRequest,
+  planGovernedConnectionRequest,
+} from "../services/connections/connectionExecutionProfile.js";
 import { SUPPORTED_PROVIDER_SIGNATURES } from "../services/connections/connectionProviderVerification.js";
 import { resolveConnectionTargetTenant } from "../services/connections/connectionTargetTenant.js";
 import { TEST_PERMISSIONS, READ_PERMISSIONS } from "./connections.js";
@@ -93,8 +97,10 @@ function capabilityProjection() {
       query: true,
       headers: true,
       body: true,
+      body_encoding: true,
       content_type: true,
       accept: true,
+      response_encoding: true,
       idempotency_key: true,
     },
     profile_input: {
@@ -107,6 +113,11 @@ function capabilityProjection() {
       oauth_client_credentials: "attrs.oauth_client_credentials",
       provider_signature: "attrs.provider_signature",
     },
+    functions: {
+      plan: "planGovernedConnectionRequest",
+      execute: "executeGovernedConnectionRequest",
+      inbound_verify: "verifyGovernedInboundRequest",
+    },
     limits: {
       max_request_body_bytes: MAX_REQUEST_BODY_BYTES,
       max_response_body_bytes: MAX_RESPONSE_BODY_BYTES,
@@ -115,12 +126,13 @@ function capabilityProjection() {
       persistence: "encrypted_connection_secret",
       plaintext_in_profile: false,
       plaintext_in_plan_response: false,
+      plaintext_in_execution_response: false,
     },
   };
 }
 
 function mapExecutionError(error) {
-  if (error instanceof ConnectionOutboundRuntimeError) {
+  if (error instanceof ConnectionOutboundRuntimeError || error instanceof OutboundHttpPolicyError) {
     return {
       status: Number.isInteger(error.status) ? error.status : 400,
       body: { ok: false, error: error.code || "CONNECTION_REQUEST_INVALID" },
@@ -129,9 +141,15 @@ function mapExecutionError(error) {
   return { status: 500, body: { ok: false, error: "CONNECTION_SERVICE_UNAVAILABLE" } };
 }
 
+async function resolveTarget(deps, app, tenantCode) {
+  const target = await deps.resolveConnectionTargetTenant(app.db, tenantCode);
+  return target?.id ? target : null;
+}
+
 export default async function connectionExecutionRoutes(app, options = {}) {
   const deps = {
     planGovernedConnectionRequest,
+    executeGovernedConnectionRequest,
     resolveConnectionTargetTenant,
     ...(options.services || {}),
   };
@@ -167,14 +185,54 @@ export default async function connectionExecutionRoutes(app, options = {}) {
   );
 
   app.post(
+    "/owner-admin/connections/:code/execute",
+    { schema: { params: codeParamsSchema(false), body: requestInputSchema() } },
+    async (req, reply) => {
+      const session = await requirePermission(app, req, reply, TEST_PERMISSIONS, { csrf: true });
+      if (!session) return;
+      try {
+        const result = await deps.executeGovernedConnectionRequest({
+          pool: app.db,
+          tenantId: session.tenant_id,
+          connectionCode: req.params.code,
+          request: req.body || {},
+          config: app.config,
+          requireEnabled: true,
+        });
+        req.log.info({
+          event: "connection_outbound_execute",
+          tenant_id: session.tenant_id,
+          identity_id: session.identity_id,
+          connection_code: req.params.code,
+          method: text(req.body?.method || "GET").toUpperCase(),
+          status_code: result.status_code,
+          attempts: result.attempts,
+        });
+        return reply.send({ ok: true, result });
+      } catch (error) {
+        const mapped = mapExecutionError(error);
+        req.log[mapped.status >= 500 ? "error" : "warn"]({
+          event: "connection_outbound_execute_error",
+          tenant_id: session.tenant_id,
+          identity_id: session.identity_id,
+          connection_code: req.params.code,
+          code: error?.code || error?.name || "ERROR",
+          status: mapped.status,
+        });
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    }
+  );
+
+  app.post(
     "/owner-admin/connections/tenants/:tenantCode/:code/request-plan",
     { schema: { params: codeParamsSchema(true), body: requestInputSchema() } },
     async (req, reply) => {
       const session = await requirePermission(app, req, reply, TEST_PERMISSIONS, { csrf: true });
       if (!session) return;
       try {
-        const target = await deps.resolveConnectionTargetTenant(app.db, req.params.tenantCode);
-        if (!target?.id) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+        const target = await resolveTarget(deps, app, req.params.tenantCode);
+        if (!target) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
         const result = await deps.planGovernedConnectionRequest({
           pool: app.db,
           tenantId: target.id,
@@ -191,6 +249,50 @@ export default async function connectionExecutionRoutes(app, options = {}) {
             tenant_code: text(req.params?.tenantCode).slice(0, 128),
           });
         }
+        return reply.code(mapped.status).send(mapped.body);
+      }
+    }
+  );
+
+  app.post(
+    "/owner-admin/connections/tenants/:tenantCode/:code/execute",
+    { schema: { params: codeParamsSchema(true), body: requestInputSchema() } },
+    async (req, reply) => {
+      const session = await requirePermission(app, req, reply, TEST_PERMISSIONS, { csrf: true });
+      if (!session) return;
+      try {
+        const target = await resolveTarget(deps, app, req.params.tenantCode);
+        if (!target) return reply.code(404).send({ ok: false, error: "TENANT_NOT_FOUND" });
+        const result = await deps.executeGovernedConnectionRequest({
+          pool: app.db,
+          tenantId: target.id,
+          connectionCode: req.params.code,
+          request: req.body || {},
+          config: app.config,
+          requireEnabled: true,
+        });
+        req.log.info({
+          event: "connection_target_outbound_execute",
+          actor_tenant_id: session.tenant_id,
+          target_tenant_id: target.id,
+          identity_id: session.identity_id,
+          connection_code: req.params.code,
+          method: text(req.body?.method || "GET").toUpperCase(),
+          status_code: result.status_code,
+          attempts: result.attempts,
+        });
+        return reply.send({ ok: true, target_tenant: target, result });
+      } catch (error) {
+        const mapped = mapExecutionError(error);
+        req.log[mapped.status >= 500 ? "error" : "warn"]({
+          event: "connection_target_outbound_execute_error",
+          actor_tenant_id: session.tenant_id,
+          tenant_code: text(req.params?.tenantCode).slice(0, 128),
+          identity_id: session.identity_id,
+          connection_code: req.params.code,
+          code: error?.code || error?.name || "ERROR",
+          status: mapped.status,
+        });
         return reply.code(mapped.status).send(mapped.body);
       }
     }
