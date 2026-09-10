@@ -52,17 +52,61 @@ test("read-only generated fields cannot be injected into create payloads", () =>
   assert.equal(Object.prototype.hasOwnProperty.call(payload.identity, "connection_code"), false);
 });
 
-test("create-only disabled metadata is retained for activation controls", () => {
+test("activation fields can be hidden only during creation", () => {
   const field = normalizeStepEditorField({
     key: "is_enabled",
     path: "identity.is_enabled",
     label: "Enabled",
     type: "checkbox",
     default_value: false,
-    disabled_on_create: true,
+    hide_on_create: true,
   });
 
   assert.equal(field.type, "checkbox");
   assert.equal(field.default_value, false);
-  assert.equal(field.disabled_on_create, true);
+  assert.equal(field.hide_on_create, true);
+  assert.equal(field.disabled_on_create, false);
+});
+
+test("hide-on-create fields are excluded from create validation and payload patching", () => {
+  const fields = normalizeStepEditorFields([
+    {
+      key: "connection_name",
+      path: "identity.connection_name",
+      label: "Connection name",
+      required: true,
+    },
+    {
+      key: "activation_gate",
+      path: "identity.activation_gate",
+      label: "Activation gate",
+      required: true,
+      hide_on_create: true,
+    },
+  ]);
+
+  assert.deepEqual(
+    validateStepEditorDraft(
+      { connection_name: "Acme Portal", activation_gate: "" },
+      fields,
+      { isCreate: true }
+    ),
+    []
+  );
+  assert.deepEqual(
+    validateStepEditorDraft(
+      { connection_name: "Acme Portal", activation_gate: "" },
+      fields
+    ),
+    [{ key: "activation_gate", message: "Activation gate is required." }]
+  );
+
+  const payload = patchRecordFromStepDraft(
+    {},
+    { connection_name: "Acme Portal", activation_gate: "operator-value" },
+    fields,
+    { isCreate: true }
+  );
+  assert.equal(payload.identity.connection_name, "Acme Portal");
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.identity, "activation_gate"), false);
 });

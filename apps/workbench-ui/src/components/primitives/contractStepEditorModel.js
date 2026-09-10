@@ -97,6 +97,7 @@ export function normalizeStepEditorField(rawField) {
     immutable_after_create: rawField.immutable_after_create === true,
     read_only: rawField.read_only === true,
     disabled_on_create: rawField.disabled_on_create === true,
+    hide_on_create: rawField.hide_on_create === true,
   };
 }
 
@@ -207,10 +208,11 @@ export function buildStepEditorDraft(record, fields) {
   return output;
 }
 
-export function validateStepEditorDraft(draft, fields) {
+export function validateStepEditorDraft(draft, fields, options = {}) {
   const errors = [];
+  const isCreate = options.isCreate === true;
   for (const field of Array.isArray(fields) ? fields : []) {
-    if (field.read_only) continue;
+    if (field.read_only || (isCreate && field.hide_on_create)) continue;
     const value = draft?.[field.key];
     if (field.required && field.type !== "checkbox") {
       if (value === null || value === undefined || String(value).trim() === "") {
@@ -236,7 +238,7 @@ export function patchRecordFromStepDraft(baseRecord, draft, fields, options = {}
   const isCreate = options.isCreate === true;
 
   for (const field of Array.isArray(fields) ? fields : []) {
-    if (field.read_only) continue;
+    if (field.read_only || (isCreate && field.hide_on_create)) continue;
     if (!Object.prototype.hasOwnProperty.call(draft || {}, field.key)) continue;
     if (!isCreate && field.immutable_after_create) continue;
     let value = draft[field.key];

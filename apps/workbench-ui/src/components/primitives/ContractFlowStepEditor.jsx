@@ -106,8 +106,9 @@ function ContractFlowStepEditor({ node, ctx }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const loadTokenRef = useRef(0);
 
-  const basicFields = fields.filter((field) => !field.advanced);
-  const advancedFields = fields.filter((field) => field.advanced);
+  const visibleFields = fields.filter((field) => !(createMode && field.hide_on_create));
+  const basicFields = visibleFields.filter((field) => !field.advanced);
+  const advancedFields = visibleFields.filter((field) => field.advanced);
 
   const buildPathParams = useCallback((recordId) => {
     const pathParamName = normalizeText(props.record_path_param || "id") || "id";
@@ -256,7 +257,7 @@ function ContractFlowStepEditor({ node, ctx }) {
       return;
     }
 
-    const validationErrors = validateStepEditorDraft(draft, fields);
+    const validationErrors = validateStepEditorDraft(draft, fields, { isCreate: createMode });
     if (validationErrors.length > 0) {
       setFieldErrors(Object.fromEntries(validationErrors.map((entry) => [entry.key, entry.message])));
       setStatus(props.validation_message || "Complete the required fields before saving.");
