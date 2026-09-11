@@ -3,8 +3,8 @@ import {
   ConnectionInboundRuntimeError,
   assertInboundRequestAllowed,
   resolvePublicConnection,
-  verifyInboundRequest,
 } from "../services/connections/connectionInboundRuntime.js";
+import { verifyGovernedInboundRequest } from "../services/connections/connectionInboundVerification.js";
 import { acceptInboundRequest } from "../services/connections/connectionInboundDispatch.js";
 import { enforceInboundRateLimit } from "../services/connections/connectionInboundRateLimit.js";
 import {
@@ -78,14 +78,21 @@ function dispatchMessage(status) {
 }
 
 export default async function publicConnectionRoutes(app, options = {}) {
+  const serviceOverrides = options.services || {};
+  const verifier = serviceOverrides.verifyGovernedInboundRequest
+    || serviceOverrides.verifyInboundRequest
+    || verifyGovernedInboundRequest;
   const deps = {
     resolvePublicConnection,
     assertInboundRequestAllowed,
     enforceInboundRateLimit,
-    verifyInboundRequest,
+    verifyGovernedInboundRequest: verifier,
     acceptInboundRequest,
-    ...(options.services || {}),
+    ...serviceOverrides,
   };
+  // `verifyInboundRequest` was the historical injection seam. Do not let its
+  // compatibility key replace the governed dependency name after spreading.
+  deps.verifyGovernedInboundRequest = verifier;
 
   configureRawBodyParser(app);
 
@@ -112,16 +119,13 @@ export default async function publicConnectionRoutes(app, options = {}) {
         rawBody: req.body,
       });
 
-      // Rate limiting deliberately precedes credential verification. The shared
-      // PostgreSQL bucket therefore counts bad-auth attempts as well as accepted
-      // requests and remains authoritative across multiple API replicas.
       await deps.enforceInboundRateLimit({
         pool: app.db,
         tenantId: tenant.tenant_id,
         profile,
       });
 
-      const verification = await deps.verifyInboundRequest({
+      const verification = await deps.verifyGovernedInboundRequest({
         pool: app.db,
         tenantId: tenant.tenant_id,
         profile,

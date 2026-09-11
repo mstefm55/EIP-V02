@@ -3,7 +3,11 @@ import {
   SUPPORTED_IDEMPOTENCY_SCOPES,
   SUPPORTED_INBOUND_VERIFICATION_MODES,
   SUPPORTED_MAPPING_MODES,
+  SUPPORTED_OUTBOUND_AUTH_MODES,
+  SUPPORTED_OUTBOUND_BODY_ENCODINGS,
+  SUPPORTED_OUTBOUND_RESPONSE_ENCODINGS,
   buildConnectionActivationStatus,
+  outboundRequestDefaults,
   requiredInboundSecretKind,
   requiredOutboundSecretKind,
 } from "./connectionActivation.js";
@@ -15,6 +19,7 @@ import {
 import { inspectInboundRateLimit } from "./connectionRateLimitPolicy.js";
 
 const LIVE_INBOUND_MODES = SUPPORTED_INBOUND_VERIFICATION_MODES;
+const LIVE_OUTBOUND_AUTH_MODES = SUPPORTED_OUTBOUND_AUTH_MODES;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -77,7 +82,7 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
         Boolean(verificationMode)
         && LIVE_INBOUND_MODES.has(verificationMode)
         && !(environment === "production" && verificationMode === "none"),
-      message: "Inbound verification uses a governed EIP connection verification mode.",
+      message: "Inbound verification uses an implemented connection verification mode.",
     },
     {
       code: "UNVERIFIED_POLICY",
@@ -163,6 +168,11 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
   const direction = text(identity.direction).toLowerCase();
   const authMode = text(outbound.auth_mode).toLowerCase();
   const requiredSecretKind = requiredOutboundSecretKind(profile);
+  const requestDefaults = outboundRequestDefaults(profile);
+  const bodyEncoding = text(requestDefaults.body_encoding).toLowerCase();
+  const responseEncoding = text(requestDefaults.response_encoding).toLowerCase();
+  const activation = buildConnectionActivationStatus(profile, credentialStatuses);
+
   const checks = [
     {
       code: "DIRECTION",
@@ -176,13 +186,23 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
     },
     {
       code: "AUTH_MODE",
-      ok: Boolean(authMode),
-      message: "Outbound authentication mode is configured.",
+      ok: Boolean(authMode) && LIVE_OUTBOUND_AUTH_MODES.has(authMode),
+      message: "Outbound authentication mode is implemented by the connection runtime.",
     },
     {
       code: "TEST_METHOD",
       ok: Boolean(text(outbound.test_request_method)),
       message: "Outbound test method is configured.",
+    },
+    {
+      code: "BODY_ENCODING",
+      ok: !bodyEncoding || SUPPORTED_OUTBOUND_BODY_ENCODINGS.has(bodyEncoding),
+      message: "Default outbound request body format is supported.",
+    },
+    {
+      code: "RESPONSE_ENCODING",
+      ok: !responseEncoding || SUPPORTED_OUTBOUND_RESPONSE_ENCODINGS.has(responseEncoding),
+      message: "Default outbound response format is supported.",
     },
     {
       code: "CREDENTIAL",
@@ -193,17 +213,26 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
     },
   ];
 
+  const configured = checks.every((check) => check.ok);
+  const runtimeAvailable = configured && activation.ready;
   return {
-    configured: checks.every((check) => check.ok),
+    configured,
+    activation_ready: activation.ready,
+    activation_blockers: activation.blockers,
+    runtime_available: runtimeAvailable,
+    runtime_status: runtimeAvailable ? "AVAILABLE" : "CONFIGURATION_INCOMPLETE",
     direction,
     auth_mode: authMode || null,
     required_secret_kind: requiredSecretKind,
+    request_body_encoding: bodyEncoding || null,
+    response_encoding: responseEncoding || null,
     checks,
   };
 }
 
 export {
   LIVE_INBOUND_MODES,
+  LIVE_OUTBOUND_AUTH_MODES,
   buildInboundReadiness,
   buildOutboundReadiness,
   requiredInboundSecretKind,

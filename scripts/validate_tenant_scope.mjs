@@ -10,7 +10,8 @@ const serverPathPrefixes = [
   `services${path.sep}api${path.sep}scripts${path.sep}`,
 ];
 const dbAccessPattern = /\b(app|client|pool|db|prisma|repo|repository)\.(query|findMany|findFirst|findUnique|queryRaw|executeRaw|updateMany|deleteMany|update|delete|insert|select)\s*\(|\b(queryRaw|executeRaw)\s*\(/i;
-const sqlVerbPattern = /\b(SELECT|INSERT|UPDATE|DELETE)\b/;
+const sqlVerbStartPattern = /\b(SELECT|INSERT|UPDATE|DELETE)\b/i;
+const sqlStatementPattern = /\bSELECT\b[\s\S]{0,900}?\bFROM\b|\bINSERT\s+INTO\b|\bUPDATE\b[\s\S]{0,500}?\bSET\b|\bDELETE\s+FROM\b/i;
 const tenantScopePattern = /\b(tenantId|tenant_id|tenantScope|scopeTenant|withTenant|forTenant|tenantContext|ctx\.tenant|requestTenant|tenant\s*:\s*|orgId|accountId)\b/i;
 const globallyScopedPattern = /\b(information_schema|pg_catalog|to_regclass|schema_migrations|migration)\b|select\s+1\s+as\s+ok/i;
 const rawTenantSettingsPoolQueryPattern = /app\.db\.query\s*\([\s\S]{0,900}?tenant\.tenant_settings/i;
@@ -37,6 +38,13 @@ function isCodeFile(relPath) {
 
 function isServerDataAccessCandidate(relPath) {
   return serverPathPrefixes.some((prefix) => relPath.startsWith(prefix));
+}
+
+function isLikelySqlStatement(lines, index) {
+  const line = lines[index];
+  if (!sqlVerbStartPattern.test(line)) return false;
+  const statementWindow = lines.slice(index, Math.min(lines.length, index + 10)).join('\n');
+  return sqlStatementPattern.test(statementWindow);
 }
 
 const failures = [];
@@ -71,7 +79,7 @@ for (const abs of walk(root)) {
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (!dbAccessPattern.test(line) && !sqlVerbPattern.test(line)) continue;
+    if (!dbAccessPattern.test(line) && !isLikelySqlStatement(lines, i)) continue;
 
     const windowStart = Math.max(0, i - 45);
     const windowEnd = Math.min(lines.length, i + 21);

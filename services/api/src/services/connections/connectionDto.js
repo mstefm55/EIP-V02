@@ -42,6 +42,10 @@ function safeArray(value, maxItems = 100) {
     : [];
 }
 
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
 function isSensitiveKey(key) {
   const normalized = text(key).trim();
   if (!normalized) return true;
@@ -67,6 +71,63 @@ function sanitizePublicJson(value, depth = 0) {
     if (isSensitiveKey(key)) continue;
     output[key] = sanitizePublicJson(entry, depth + 1);
   }
+  return output;
+}
+
+function sanitizeNamedMap(value, { maxEntries = 100 } = {}) {
+  const source = plainObject(value);
+  const output = {};
+  for (const [key, entry] of Object.entries(source).slice(0, maxEntries)) {
+    if (isSensitiveKey(key)) continue;
+    const safe = sanitizePublicJson(entry, 1);
+    if (safe !== null && safe !== undefined) output[key] = safe;
+  }
+  return output;
+}
+
+function sanitizeConnectionAttrs(value) {
+  const attrs = plainObject(value);
+  const output = sanitizePublicJson(attrs) || {};
+
+  // These are configuration names, not credential values. The generic DTO
+  // sanitizer intentionally removes token/secret-labelled keys, so restore only
+  // the explicitly allowlisted non-secret execution metadata needed by the UI.
+  if (attrs.oauth_client_credentials && typeof attrs.oauth_client_credentials === "object") {
+    const oauth = plainObject(attrs.oauth_client_credentials);
+    output.oauth_client_credentials = {
+      client_auth_method: optionalText(oauth.client_auth_method),
+      token_body_encoding: optionalText(oauth.token_body_encoding),
+      token_params: sanitizeNamedMap(oauth.token_params),
+      token_headers: sanitizeNamedMap(oauth.token_headers),
+      token_header_name: optionalText(oauth.token_header_name),
+      token_prefix: optionalText(oauth.token_prefix),
+    };
+  }
+
+  if (attrs.provider_signature && typeof attrs.provider_signature === "object") {
+    const provider = plainObject(attrs.provider_signature);
+    output.provider_signature = {
+      provider_code: optionalText(provider.provider_code),
+      header_name: optionalText(provider.header_name),
+      webhook_id: optionalText(provider.webhook_id),
+      max_skew_sec: finiteNumber(provider.max_skew_sec),
+      secret_kind: optionalText(provider.secret_kind),
+    };
+  }
+
+  if (attrs.outbound_request && typeof attrs.outbound_request === "object") {
+    const request = plainObject(attrs.outbound_request);
+    output.outbound_request = {
+      body_encoding: optionalText(request.body_encoding),
+      response_encoding: optionalText(request.response_encoding),
+      content_type: optionalText(request.content_type),
+      accept: optionalText(request.accept),
+      idempotency_header_name: optionalText(request.idempotency_header_name),
+      max_body_bytes: finiteNumber(request.max_body_bytes),
+      max_response_bytes: finiteNumber(request.max_response_bytes),
+    };
+  }
+
   return output;
 }
 
@@ -212,7 +273,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
       ip_allowlist: safeArray(audit.ip_allowlist),
       log_level: optionalText(audit.log_level),
     },
-    attrs: sanitizePublicJson(profile?.attrs || {}) || {},
+    attrs: sanitizeConnectionAttrs(profile?.attrs || {}),
     health,
     credential_status: sanitizeCredentialStatus(credentialStatus),
     setting_status: optionalText(profile?.setting_status) || "active",
@@ -223,6 +284,7 @@ function toConnectionDetailDto(profile, credentialStatus = {}) {
 
 export {
   isSensitiveKey,
+  sanitizeConnectionAttrs,
   sanitizeCredentialStatus,
   sanitizePublicJson,
   toConnectionDetailDto,
