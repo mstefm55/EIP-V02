@@ -30,8 +30,14 @@ function baseInbound(providerCode) {
       idempotency_scope: "connection",
     },
     routing: {
+      channel: "custom",
+      schema_version: "v1",
+      envelope_profile: "json",
       mapping_mode: "passthrough",
       provider_code: providerCode,
+    },
+    audit: {
+      log_level: "info",
     },
     attrs: {
       provider_signature: {
@@ -53,6 +59,16 @@ function baseOutbound(authMode) {
       base_url: "https://api.example.com",
       auth_mode: authMode,
       auth: {},
+      test_request_method: "HEAD",
+    },
+    routing: {
+      channel: "custom",
+      schema_version: "v1",
+      envelope_profile: "json",
+      mapping_mode: "passthrough",
+    },
+    audit: {
+      log_level: "info",
     },
     attrs: {
       outbound_request: {
@@ -75,6 +91,7 @@ test("Stripe provider-signature activation requires the governed signing secret"
   });
   assert.equal(configured.some((entry) => entry.path?.startsWith("attrs.provider_signature")), false);
   assert.equal(configured.some((entry) => entry.code === "ACTIVATION_CREDENTIAL_REQUIRED"), false);
+  assert.equal(configured.length, 0);
 });
 
 test("PayPal provider-signature activation requires webhook ID but no stored provider secret", () => {
@@ -87,6 +104,7 @@ test("PayPal provider-signature activation requires webhook ID but no stored pro
   const configured = validateConnectionActivation(profile, {});
   assert.equal(configured.some((entry) => entry.code === "ACTIVATION_PAYPAL_WEBHOOK_ID_REQUIRED"), false);
   assert.equal(configured.some((entry) => entry.code === "ACTIVATION_PROVIDER_SIGNATURE_UNSUPPORTED"), false);
+  assert.equal(configured.length, 0);
 });
 
 test("unknown provider signature adapter fails activation", () => {
@@ -120,4 +138,11 @@ test("activation rejects request encodings the runtime cannot consume", () => {
   const issues = validateConnectionActivation(profile, {});
   assert.ok(issues.some((entry) => entry.code === "ACTIVATION_OUTBOUND_BODY_ENCODING_UNSUPPORTED"));
   assert.ok(issues.some((entry) => entry.code === "ACTIVATION_OUTBOUND_RESPONSE_ENCODING_UNSUPPORTED"));
+});
+
+test("endpoint health probes reject mutating methods before activation", () => {
+  const profile = baseOutbound("none");
+  profile.outbound.test_request_method = "POST";
+  const issues = validateConnectionActivation(profile, {});
+  assert.ok(issues.some((entry) => entry.code === "ACTIVATION_PROBE_METHOD_UNSAFE"));
 });
