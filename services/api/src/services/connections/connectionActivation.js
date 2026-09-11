@@ -25,6 +25,7 @@ const SUPPORTED_OUTBOUND_RESPONSE_ENCODINGS = new Set(["auto", "json", "text", "
 const SUPPORTED_IDEMPOTENCY_LOCATIONS = new Set(["header", "query", "body"]);
 const SUPPORTED_IDEMPOTENCY_SCOPES = new Set(["connection", "tenant"]);
 const SUPPORTED_MAPPING_MODES = new Set(["passthrough", "mapped"]);
+const SAFE_CONNECTION_PROBE_METHODS = new Set(["GET", "HEAD"]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -99,6 +100,7 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
   const verification = profile?.verification || {};
   const idempotency = profile?.idempotency || {};
   const routing = profile?.routing || {};
+  const audit = profile?.audit || {};
   const outbound = profile?.outbound || {};
   const outboundAuth = outbound.auth || {};
   const direction = text(identity.direction).toLowerCase();
@@ -116,6 +118,26 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
 
   if (!["inbound", "outbound", "both"].includes(direction)) {
     add("identity.direction", "ACTIVATION_DIRECTION_REQUIRED", "Connection direction must be configured before activation.");
+  }
+
+  // Keep the activation/readiness contract aligned with the canonical seven-step
+  // operator flow. These are governed profile requirements already enforced by
+  // persistence validation; surfacing them here prevents a false green readiness
+  // state followed by an activation rejection.
+  if (!text(routing.channel)) {
+    add("routing.channel", "ACTIVATION_CHANNEL_REQUIRED", "Routing channel must be configured before activation.");
+  }
+  if (!mappingMode || !SUPPORTED_MAPPING_MODES.has(mappingMode)) {
+    add("routing.mapping_mode", "ACTIVATION_MAPPING_MODE_REQUIRED", "A supported routing mapping mode is required before activation.");
+  }
+  if (!text(routing.schema_version)) {
+    add("routing.schema_version", "ACTIVATION_SCHEMA_VERSION_REQUIRED", "Routing schema version must be configured before activation.");
+  }
+  if (!text(routing.envelope_profile)) {
+    add("routing.envelope_profile", "ACTIVATION_ENVELOPE_PROFILE_REQUIRED", "Routing envelope profile must be configured before activation.");
+  }
+  if (!text(audit.log_level)) {
+    add("audit.log_level", "ACTIVATION_LOG_LEVEL_REQUIRED", "Audit log level must be configured before activation.");
   }
 
   if (["inbound", "both"].includes(direction)) {
@@ -220,9 +242,6 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
     if (!SUPPORTED_IDEMPOTENCY_SCOPES.has(idempotencyScope)) {
       add("idempotency.idempotency_scope", "ACTIVATION_IDEMPOTENCY_SCOPE_REQUIRED", "Inbound idempotency requires a governed scope.");
     }
-    if (!SUPPORTED_MAPPING_MODES.has(mappingMode)) {
-      add("routing.mapping_mode", "ACTIVATION_MAPPING_MODE_REQUIRED", "Inbound routing requires a supported governed mapping mode.");
-    }
     if (mappingMode === "mapped") {
       for (const mappingIssue of validateInboundMappingConfig(profile, { requireMapped: true })) {
         add(mappingIssue.path, `ACTIVATION_${mappingIssue.code}`, mappingIssue.message);
@@ -274,6 +293,17 @@ function validateConnectionActivation(profile, credentialStatuses = {}) {
       }
     }
 
+    const probeMethod = text(outbound.test_request_method).toUpperCase();
+    if (!probeMethod) {
+      add("outbound.test_request_method", "ACTIVATION_PROBE_METHOD_REQUIRED", "Endpoint health-check method must be configured before activation.");
+    } else if (!SAFE_CONNECTION_PROBE_METHODS.has(probeMethod)) {
+      add(
+        "outbound.test_request_method",
+        "ACTIVATION_PROBE_METHOD_UNSAFE",
+        "Endpoint health checks are restricted to GET or HEAD. Use Authenticated request test for mutating methods."
+      );
+    }
+
     const bodyEncoding = text(requestDefaults.body_encoding).toLowerCase();
     if (bodyEncoding && !SUPPORTED_OUTBOUND_BODY_ENCODINGS.has(bodyEncoding)) {
       add(
@@ -315,6 +345,7 @@ function buildConnectionActivationStatus(profile, credentialStatuses = {}) {
 }
 
 export {
+  SAFE_CONNECTION_PROBE_METHODS,
   SUPPORTED_IDEMPOTENCY_LOCATIONS,
   SUPPORTED_IDEMPOTENCY_SCOPES,
   SUPPORTED_INBOUND_VERIFICATION_MODES,
