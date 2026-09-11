@@ -14,7 +14,7 @@ Implementation guardrails for contributors working on V2 runtime code.
 
 ## V2 Progress Record (Living)
 
-Last updated: 2026-04-06
+Last updated: 2026-09-11
 
 1. `v2_0001` to `v2_0003`
 - Kernel/bootstrap schemas established (`kernel`, `tenant`, `security`).
@@ -228,6 +228,16 @@ Last updated: 2026-04-06
 - Seed/bootstrap now populates tenant-scoped owner-admin baseline records in `eip_core.service_object` for every menu module (dashboard, tenant requests, connections, tasks, users, portfolios, templates, security, audit, data explorer, integrations, reports, settings).
 - No schema table was added; owner-admin module records reuse the governed kernel store `eip_core.service_object` with module/object-type partitioning.
 
+36. Connections executable runtime and production closure (through `v2_0060`, no new feature table)
+- Owner Admin Connections is tenant-targeted through server-resolved tenant-code handles; browser-controlled `tenant_id` remains invalid and tenant-owned reads/writes stay inside the existing tenant/RLS boundary.
+- Connection identity uses the V1-compatible server-generated `conn-<serial>` protocol, and every new connection is created as a disabled draft before governed activation/readiness checks.
+- Dedicated Connections permissions remain separated for read, write, secret management, and test/execute operations; writes remain CSRF-protected and secret mutations require recent OTP/TOTP assurance.
+- The inbound gateway is executable: bounded transport policy, verification, rate limiting, idempotency receipts through generic kernel evidence, duplicate suppression, governed mapping, Service Object creation, and canonical Process Engine handoff are part of one governed acceptance path.
+- The outbound runtime is executable and provider-capable: governed method/path/query/headers/body, JSON/form/text/base64 request encodings, response decoding, idempotency, bounded timeout/retry behavior, SSRF/DNS-pinning/no-redirect controls, and encrypted bearer/API-key/Basic/OAuth2 client-credentials authentication are implemented.
+- Governed provider-signature verification is implemented for Stripe and PayPal without provider-specific branches in generic React primitives; low-frequency execution/provider settings stay metadata-owned under Advanced disclosure.
+- Selectable capability truth is fail-closed: unsupported inbound OAuth/JWT was removed rather than left as a configurable-but-nonfunctional option.
+- Final regression evidence passed the complete V2 governance workflow (API tests, Workbench tests/build, security, tenant scope, process governance). PR #16 merged as `7cb0c141466f37395e71a6526d96ec635c75bff2`, and both production API and frontend deployments completed successfully with the API health check returning `200`.
+
 ## Full System Explanation (Current V2)
 
 ### 1) Kernel, Tenancy, and Security Base
@@ -321,6 +331,22 @@ Last updated: 2026-04-06
   - macro-level effect bundles
   - effect-level service object type/category parameters
 - Effect catalog choices remain governed by taxonomy metadata (`PROCESS_EFFECT_TYPE`); no one-off hardcoded effect functions are introduced.
+
+### 10) Connections Control Plane and Execution Runtime
+
+- Connections is a governed integration control plane, not a parallel business-process engine. It owns external transport configuration, credential lifecycle, verification, reliability, routing/mapping metadata, health/test execution, and bounded integration evidence.
+- Owner Admin selects a tenant by a server-provided tenant-code handle. The API resolves that handle to the active tenant ID server-side before entering tenant-scoped transactions/RLS; raw browser `tenant_id` is not accepted as authority.
+- Connection profiles remain tenant-scoped governed settings rather than a new integration-specific table. Secrets are stored separately through the encrypted Connection secret lifecycle and are never persisted in profile JSON or echoed through normal detail/read responses.
+- New profiles are disabled drafts and use server-generated `conn-<serial>` identity. Activation is a governed state change that fails closed when required transport, verification, idempotency, mapping, or credential readiness is incomplete.
+- Inbound transport uses the canonical public/EDI gateway routes. The runtime enforces bounded body/method/content policy, rate limits, configured verification, and exact idempotency before business dispatch. Identical replays are suppressed; reuse of an event ID with a different payload fails with conflict.
+- Mapped inbound events create a bounded governed Service Object projection and delegate process selection/start to the canonical Process Engine. Passthrough mappings remain transport-only and do not create a second process authority.
+- Outbound execution is owned by the Connections runtime rather than Object Effect primitives. Callers provide only governed request inputs; destination authority remains in the stored profile. Runtime supports bounded HTTP methods, relative paths, query, headers, body encodings, content negotiation, response decoding, timeout/retry policy, and idempotency keys.
+- Outbound authentication consumes encrypted Connection credentials for bearer, API-key header/query, Basic, and OAuth2 client-credentials flows. OAuth token exchange remains subject to the same outbound network safety policy as the final provider request.
+- SSRF protection is fail-closed: unsafe protocols/hosts/addresses are rejected, DNS results are validated and pinned, and redirects are not followed automatically.
+- Provider webhook verification is adapter-driven server-side. Stripe verification uses raw body + signature header + encrypted signing secret with timestamp tolerance. PayPal verification uses raw body + transmission headers + governed webhook ID + trusted PayPal certificate validation. Provider-specific rules do not enter generic React primitives.
+- The seven-step Connections UX remains metadata-composed: Identity, Endpoint, Security, Reliability, Routing & Mapping, Test & Health, Audit. Low-frequency provider/execution controls are disclosed through metadata-driven Advanced fields rather than hardcoded provider pages.
+- Dedicated permissions are fixed by operation class: read, write, secret manage, and test/execute. CSRF remains mandatory for mutations; recent OTP/TOTP assurance remains mandatory for secret mutation; capability metadata that lacks a real runtime consumer is not allowed to remain selectable.
+- Reference execution contract: `docs/architecture/CONNECTION_EXECUTION_CAPABILITY_V1.md`.
 
 ## Process Engine Rules (Wave 3.5 baseline)
 
@@ -469,7 +495,7 @@ Last updated: 2026-04-06
 
 ## Current Technical Notes
 
-- `HTTP_REQUEST` effect path is fail-closed when gateway outbound module is not present in V2.
+- `HTTP_REQUEST` remains outside Object Effect Primitive V1 authority; outbound integration execution is owned by the governed Connections runtime rather than by a Process Effect handler.
 - `auth_identity_agent` mapping remains optional at runtime; when no active primary mapping exists, process execution continues with `actor_agent_id = null`.
 - `routes/crm_process.js` is a thin alias to `routes/process/core_process.js`; CRM lifecycle handling must stay under shared process engine routes, not a separate route-local authority.
 - Governance drift checks should include `node scripts/validate_process_governance.mjs` in addition to existing security/tenant scripts.
