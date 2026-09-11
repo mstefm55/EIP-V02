@@ -31,8 +31,14 @@ function baseProfile() {
       idempotency_scope: "connection",
     },
     routing: {
+      channel: "custom",
+      schema_version: "v1",
+      envelope_profile: "json",
       mapping_mode: "passthrough",
       mapping: {},
+    },
+    audit: {
+      log_level: "info",
     },
   };
 }
@@ -44,6 +50,7 @@ test("inbound readiness requires the governed credential and reports live API-ke
   const missing = buildInboundReadiness(profile, {});
   assert.equal(missing.configured, false);
   assert.equal(missing.runtime_available, false);
+  assert.equal(missing.ready, false);
   assert.equal(missing.runtime_status, "CONFIGURATION_INCOMPLETE");
   assert.equal(missing.checks.find((check) => check.code === "CREDENTIAL")?.ok, false);
 
@@ -53,6 +60,7 @@ test("inbound readiness requires the governed credential and reports live API-ke
   assert.equal(ready.configured, true);
   assert.equal(ready.activation_ready, true);
   assert.equal(ready.runtime_available, true);
+  assert.equal(ready.ready, true);
   assert.equal(ready.runtime_status, "AVAILABLE");
   assert.equal(ready.mapping_mode, "passthrough");
   assert.equal(ready.business_dispatch_available, false);
@@ -84,6 +92,7 @@ test("mapped inbound readiness requires a bounded Service Object projection", ()
   });
   assert.equal(ready.configured, true);
   assert.equal(ready.runtime_available, true);
+  assert.equal(ready.ready, true);
   assert.equal(ready.business_dispatch_available, true);
   assert.equal(ready.mapping_errors.length, 0);
 });
@@ -127,6 +136,7 @@ test("sandbox none mode is live only when unverified traffic is explicitly enabl
   const ready = buildInboundReadiness(profile, {});
   assert.equal(ready.configured, true);
   assert.equal(ready.runtime_available, true);
+  assert.equal(ready.ready, true);
   assert.equal(ready.runtime_status, "AVAILABLE");
 });
 
