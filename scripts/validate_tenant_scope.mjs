@@ -10,7 +10,8 @@ const serverPathPrefixes = [
   `services${path.sep}api${path.sep}scripts${path.sep}`,
 ];
 const dbAccessPattern = /\b(app|client|pool|db|prisma|repo|repository)\.(query|findMany|findFirst|findUnique|queryRaw|executeRaw|updateMany|deleteMany|update|delete|insert|select)\s*\(|\b(queryRaw|executeRaw)\s*\(/i;
-const sqlVerbPattern = /\b(SELECT|INSERT|UPDATE|DELETE)\b/;
+// Keep SQL DELETE coverage while ignoring a quoted standalone HTTP method token such as "DELETE".
+const sqlVerbPattern = /\b(SELECT|INSERT|UPDATE)\b|\bDELETE\b(?!["'`])/i;
 const tenantScopePattern = /\b(tenantId|tenant_id|tenantScope|scopeTenant|withTenant|forTenant|tenantContext|ctx\.tenant|requestTenant|tenant\s*:\s*|orgId|accountId)\b/i;
 const globallyScopedPattern = /\b(information_schema|pg_catalog|to_regclass|schema_migrations|migration)\b|select\s+1\s+as\s+ok/i;
 const rawTenantSettingsPoolQueryPattern = /app\.db\.query\s*\([\s\S]{0,900}?tenant\.tenant_settings/i;
