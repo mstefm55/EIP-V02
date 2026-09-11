@@ -1,4 +1,5 @@
 import {
+  SAFE_CONNECTION_PROBE_METHODS,
   SUPPORTED_IDEMPOTENCY_LOCATIONS,
   SUPPORTED_IDEMPOTENCY_SCOPES,
   SUPPORTED_INBOUND_VERIFICATION_MODES,
@@ -146,6 +147,10 @@ function buildInboundReadiness(profile, credentialStatuses = {}) {
       : "CONFIGURATION_INCOMPLETE";
 
   return {
+    // `ready` is the canonical operator/acceptance shorthand. Keep the explicit
+    // runtime fields as well so consumers can distinguish configuration from
+    // activation and transport availability without reimplementing policy.
+    ready: runtimeAvailable,
     configured,
     activation_ready: activation.ready,
     activation_blockers: activation.blockers,
@@ -167,6 +172,7 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
   const outbound = profile?.outbound || {};
   const direction = text(identity.direction).toLowerCase();
   const authMode = text(outbound.auth_mode).toLowerCase();
+  const probeMethod = text(outbound.test_request_method).toUpperCase();
   const requiredSecretKind = requiredOutboundSecretKind(profile);
   const requestDefaults = outboundRequestDefaults(profile);
   const bodyEncoding = text(requestDefaults.body_encoding).toLowerCase();
@@ -191,8 +197,8 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
     },
     {
       code: "TEST_METHOD",
-      ok: Boolean(text(outbound.test_request_method)),
-      message: "Outbound test method is configured.",
+      ok: SAFE_CONNECTION_PROBE_METHODS.has(probeMethod),
+      message: "Endpoint health-check method is configured as safe GET or HEAD.",
     },
     {
       code: "BODY_ENCODING",
@@ -216,6 +222,7 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
   const configured = checks.every((check) => check.ok);
   const runtimeAvailable = configured && activation.ready;
   return {
+    ready: runtimeAvailable,
     configured,
     activation_ready: activation.ready,
     activation_blockers: activation.blockers,
@@ -223,6 +230,7 @@ function buildOutboundReadiness(profile, credentialStatuses = {}) {
     runtime_status: runtimeAvailable ? "AVAILABLE" : "CONFIGURATION_INCOMPLETE",
     direction,
     auth_mode: authMode || null,
+    probe_method: probeMethod || null,
     required_secret_kind: requiredSecretKind,
     request_body_encoding: bodyEncoding || null,
     response_encoding: responseEncoding || null,
