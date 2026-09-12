@@ -124,6 +124,29 @@ Railway injects `PORT`; do not hardcode it unless Railway service settings requi
 
 Do not commit any real values.
 
+## Platform Owner Admin repair authority
+
+`kernel.tenant_request` is a global pre-tenant onboarding queue. Its review/approve/reject/resend authority is **platform control-plane authority**, not ordinary tenant Owner Admin authority.
+
+The normal Owner Admin repair profile therefore excludes tenant-request control. When the targeted repair identity is the intentional EIP platform operator, configure the repair explicitly:
+
+```txt
+OWNER_ADMIN_REPAIR_TENANT_CODE=<platform-owner tenant code>
+OWNER_ADMIN_REPAIR_LOGIN=<platform-owner login>
+OWNER_ADMIN_REPAIR_APPLY=true
+OWNER_ADMIN_REPAIR_PLATFORM_CONTROL=true
+```
+
+`OWNER_ADMIN_REPAIR_PLATFORM_CONTROL` is fail-closed. If it is absent or false, the repair removes legacy `OWNER_ADMIN_TENANT_REQUEST_*` grants and current `PLATFORM_TENANT_REQUEST_*` grants from the target while restoring only tenant Owner Admin authority. Never set it for a customer/tenant Owner Admin identity.
+
+When the production service intentionally uses the repair during pre-deploy, the governed sequence is:
+
+```bash
+cd /app/services/api && npm run migrate:v2 && npm run repair:owner-admin-permissions
+```
+
+Migration `v2_0070_owner_admin_platform_authority_boundary.sql` deliberately removes global onboarding grants before the repair runs, so deployment fails closed until the intended platform operator is explicitly opted back in.
+
 ## Workbench UI variables
 
 If Workbench UI is deployed separately:
@@ -184,6 +207,8 @@ Normal Railway pre-deploy command:
 ```bash
 cd /app/services/api && npm run migrate:v2
 ```
+
+If the environment intentionally repairs the platform-owner identity during pre-deploy, use the explicit platform-control sequence documented above instead.
 
 For an existing Railway database that was already migrated before the ledger existed, run this one-time controlled baseline manually from a Railway shell/job with the same API environment variables:
 
