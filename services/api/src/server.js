@@ -15,12 +15,14 @@ import authRoutes from "./routes/auth.js";
 import authSessionTransportRoutes from "./routes/auth_session_transport.js";
 import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
+import tenantBootstrapPublicRoutes from "./routes/tenant_bootstrap_public.js";
 import publicConnectionRoutes from "./routes/public_connections.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
 import processStudioLifecycleRoutes from "./routes/process/process_studio_lifecycle.js";
 import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 import ownerAdminConsoleRoutes from "./routes/owner_admin_console.js";
+import ownerAdminControlRoutes from "./routes/owner_admin_control.js";
 import connectionRoutes from "./routes/connections.js";
 import connectionTargetRoutes from "./routes/connections_target.js";
 import connectionExecutionRoutes from "./routes/connections_execution.js";
@@ -170,6 +172,7 @@ function buildRuntimeConfig(overrides = {}) {
     SMTP_PASS: process.env.SMTP_PASS || null,
     SMTP_FROM: process.env.SMTP_FROM || null,
     REQUEST_ACCESS_TO: process.env.REQUEST_ACCESS_TO || null,
+    TENANT_BOOTSTRAP_PEPPER: process.env.TENANT_BOOTSTRAP_PEPPER || null,
     ENABLE_PUBLIC_DB_HEALTH: parseBoolean(process.env.ENABLE_PUBLIC_DB_HEALTH, false),
   };
 
@@ -230,6 +233,7 @@ async function buildServer(options = {}) {
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
+  await app.register(tenantBootstrapPublicRoutes, { prefix: "/api/public" });
   await app.register(publicConnectionRoutes);
   await app.register(authOrganisationRoutes, { prefix: "/api/eip" });
   await app.register(authRoutes, { prefix: "/api/eip" });
@@ -237,6 +241,7 @@ async function buildServer(options = {}) {
   await app.register(uiSurfaceRoutes, { prefix: "/api/public", public: true });
   await app.register(uiSurfaceRoutes, { prefix: "/api/eip" });
   await app.register(ownerAdminConsoleRoutes, { prefix: "/api/eip" });
+  await app.register(ownerAdminControlRoutes, { prefix: "/api/eip" });
   await app.register(connectionRoutes, { prefix: "/api/eip" });
   await app.register(connectionTargetRoutes, { prefix: "/api/eip" });
   await app.register(connectionExecutionRoutes, { prefix: "/api/eip" });
