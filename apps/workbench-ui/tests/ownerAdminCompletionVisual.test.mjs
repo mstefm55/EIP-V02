@@ -20,6 +20,20 @@ test("Owner Admin completion stylesheet loads after the shared stylesheet", () =
   assert.ok(ownerIndex > sharedIndex);
 });
 
+test("Owner Admin cascade correction loads last and removes the shared light sidebar overlay", () => {
+  const main = read("src/main.jsx");
+  const ownerIndex = main.indexOf('import "./ownerAdminCompletion.css"');
+  const cascadeIndex = main.indexOf('import "./ownerAdminCascadeFix.css"');
+  const css = read("src/ownerAdminCascadeFix.css");
+
+  assert.ok(ownerIndex >= 0);
+  assert.ok(cascadeIndex > ownerIndex);
+  assert.match(css, /\.owner-shell\s+\.owner-sidebar::before\s*\{/);
+  assert.match(css, /content\s*:\s*none/);
+  assert.match(css, /display\s*:\s*none/);
+  assert.doesNotMatch(css, /tenant_id/i);
+});
+
 test("Owner Admin completion rules stay scoped to the owner shell", () => {
   const css = read("src/ownerAdminCompletion.css");
   const cssWithoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
