@@ -19,6 +19,8 @@ stable V1 UX / useful operator behavior
 
 Healthy V2 engines and security boundaries are retained. V1 components are UX/reference sources only; V1 route contracts, cross-tenant assumptions, module tables, direct tenant UUID selection, and mock/fallback data do not become V2 authority automatically.
 
+> **Closure update (2026-09-12):** Waves B-D described below have now been implemented for the accepted Owner Admin completion scope through migrations `v2_0066`-`v2_0070`: governed Users & Access, sessions/devices, tenant Settings, redacted Audit, metadata-only Data Catalogue, persisted pre-tenant Tenant Requests, bootstrap activation/recovery, and an explicit platform-vs-tenant authority boundary for the global onboarding queue. The historical decision text below is preserved as the migration rationale; where it says a V2 capability "is not restored" or "requires backend transfer", read that as the pre-implementation audit state rather than current repository truth.
+
 ## 2. Sources reviewed
 
 V1 stable Admin UI:

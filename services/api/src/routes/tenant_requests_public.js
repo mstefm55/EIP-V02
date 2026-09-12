@@ -96,6 +96,47 @@ export default async function tenantRequestsPublicRoutes(app) {
       }
 
       const refCode = buildReferenceCode();
+      const requestId = crypto.randomUUID();
+      const consent = {
+        terms: true,
+        privacy: true,
+        accepted_at: new Date().toISOString(),
+      };
+
+      try {
+        await app.db.query(
+          `
+          INSERT INTO kernel.tenant_request
+            (id, ref_code, status_code, applicant_type, legal_name,
+             business_reg_no, personal_id_no, email, phone, country, timezone, attrs)
+          VALUES
+            ($1::uuid, $2, 'SUBMITTED', $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+          `,
+          [
+            requestId,
+            refCode,
+            applicantType,
+            legalName,
+            businessRegNo || null,
+            personalIdNo || null,
+            email,
+            phone || null,
+            country,
+            timezone,
+            JSON.stringify({
+              consent,
+              request_context: {
+                ip_hint: normalizeString(request.ip) ? "captured" : "unavailable",
+                user_agent_present: Boolean(normalizeString(request.headers["user-agent"])),
+              },
+            }),
+          ]
+        );
+      } catch (error) {
+        request.log.error({ event: "tenant_request_persist_failed", message: error?.message || String(error) });
+        return reply.code(503).send({ ok: false, error: "REQUEST_QUEUE_UNAVAILABLE" });
+      }
+
       const recipient = supportMailbox(app);
       const lines = [
         "New EIP access request",
@@ -108,18 +149,17 @@ export default async function tenantRequestsPublicRoutes(app) {
         `Phone: ${phone || "-"}`,
         `Country: ${country}`,
         `Timezone: ${timezone}`,
-        `IP: ${normalizeString(request.ip) || "-"}`,
-        `User-Agent: ${normalizeString(request.headers["user-agent"]) || "-"}`,
       ];
       const text = lines.join("\n");
       const html = `<pre>${text.replace(/[<>&]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[char]))}</pre>`;
 
-      let delivery = "logged";
+      let delivery = "queued";
       if (recipient) {
         try {
           await sendEmail(app, recipient, `EIP access request ${refCode}`, text, html);
           delivery = "email";
         } catch (error) {
+          delivery = "email_failed";
           request.log.error({
             event: "tenant_request_email_failed",
             ref: refCode,
@@ -139,6 +179,7 @@ export default async function tenantRequestsPublicRoutes(app) {
       return reply.code(202).send({
         ok: true,
         ref: refCode,
+        status: "SUBMITTED",
         delivery,
       });
     }

@@ -1,3 +1,13 @@
+const LEGACY_TENANT_REQUEST_PERMISSION_CODES = new Set([
+  "OWNER_ADMIN_TENANT_REQUEST_READ",
+  "OWNER_ADMIN_TENANT_REQUEST_WRITE",
+]);
+
+const PLATFORM_PERMISSION_ALIASES = Object.freeze({
+  PLATFORM_TENANT_REQUEST_READ: "OWNER_ADMIN_TENANT_REQUEST_READ",
+  PLATFORM_TENANT_REQUEST_WRITE: "OWNER_ADMIN_TENANT_REQUEST_WRITE",
+});
+
 function normalizePermissionCode(value) {
   const code = String(value ?? "").trim().toUpperCase();
   return code.length > 0 ? code : null;
@@ -33,7 +43,21 @@ function extractPermissionCodes(identityAttrs) {
     collected.push(...bucket);
   }
 
-  return normalizePermissionCodes(collected);
+  const declared = normalizePermissionCodes(collected);
+  const declaredSet = new Set(declared);
+  const effective = declared.filter((code) => !LEGACY_TENANT_REQUEST_PERMISSION_CODES.has(code));
+
+  // Tenant-request review is a global control-plane capability. Legacy
+  // OWNER_ADMIN_TENANT_REQUEST_* grants are deliberately inert so a tenant
+  // Owner Admin can never inherit cross-tenant onboarding authority. Explicit
+  // PLATFORM_* permission codes bridge to the legacy route contract until that
+  // contract can be retired without weakening migration compatibility.
+  for (const [platformCode, legacyAlias] of Object.entries(PLATFORM_PERMISSION_ALIASES)) {
+    if (!declaredSet.has(platformCode)) continue;
+    effective.push(platformCode, legacyAlias);
+  }
+
+  return normalizePermissionCodes(effective);
 }
 
 function buildPermissionDecision({ requiredPermissions, grantedPermissions }) {
@@ -75,6 +99,8 @@ function buildPermissionDecision({ requiredPermissions, grantedPermissions }) {
 }
 
 export {
+  LEGACY_TENANT_REQUEST_PERMISSION_CODES,
+  PLATFORM_PERMISSION_ALIASES,
   normalizePermissionCode,
   normalizePermissionCodes,
   extractPermissionCodes,

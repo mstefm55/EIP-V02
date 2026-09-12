@@ -14,7 +14,7 @@ Implementation guardrails for contributors working on V2 runtime code.
 
 ## V2 Progress Record (Living)
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 1. `v2_0001` to `v2_0003`
 - Kernel/bootstrap schemas established (`kernel`, `tenant`, `security`).
@@ -238,6 +238,23 @@ Last updated: 2026-09-11
 - Selectable capability truth is fail-closed: unsupported inbound OAuth/JWT was removed rather than left as a configurable-but-nonfunctional option.
 - Final regression evidence passed the complete V2 governance workflow (API tests, Workbench tests/build, security, tenant scope, process governance). PR #16 merged as `7cb0c141466f37395e71a6526d96ec635c75bff2`, and both production API and frontend deployments completed successfully with the API health check returning `200`.
 
+37. Connections final operator and zero-pending closure (`v2_0061` to `v2_0062`)
+- Operator-facing connection composition was completed against the executable control plane, with low-frequency provider/execution controls kept behind governed Advanced disclosure.
+- Activation/readiness truth was aligned with runtime capability, unsafe/dead selectable fields were removed, and health probing remains bounded to supported methods.
+- Connections is frozen as an accepted integration control plane; later work must consume it rather than create a second integration engine.
+
+38. Process Studio backend integration readiness (`v2_0063`)
+- Process-definition lifecycle/version governance was strengthened for production Studio integration, preserving version-pinned runtime behavior and authoritative server validation.
+- The backend remains the single canonical Process Engine; Google AI Studio authoring UI work is a separate presentation workstream and must integrate through governed adapters rather than introducing another workflow engine.
+
+39. Owner Admin control-plane completion (`v2_0064` to `v2_0069`)
+- Dashboard/navigation, Users & Access and Security projections were upgraded from recovery placeholders to operator-facing governed surfaces.
+- Public Request Access now persists a pre-tenant onboarding request in `kernel.tenant_request`; approval creates a suspended organisation and bootstrap identity, activation uses a one-time token, and resend rotates expired/pending bootstrap links without duplicating tenants.
+- Dedicated Owner Admin control routes now govern user/access mutation, session revocation, device trust, tenant settings, redacted audit evidence, schema catalogue inspection and onboarding review.
+- Privileged Owner Admin writes require authenticated EIP session, explicit permission, CSRF and recent OTP/TOTP assurance; browser-supplied raw tenant UUID is not an authority.
+- Core admin surfaces are metadata-composed with the registered generic UI primitive library and bind to the dedicated governed control contracts.
+- Data Explorer is intentionally closed as a metadata-only Data Catalogue: schema/table/column structure can be inspected, but arbitrary tenant rows, credentials and secrets are not exposed.
+
 ## Full System Explanation (Current V2)
 
 ### 1) Kernel, Tenancy, and Security Base
@@ -269,6 +286,7 @@ Last updated: 2026-09-11
   - effect library
   - service object + category runtime parameters
 - Macro execution is explicit and governed; hidden inline transition bundles are not allowed.
+- Process Studio lifecycle/version integration remains server-authoritative; external authoring UIs must use governed adapters and cannot become runtime process authority.
 
 ### 4) UI Engine Authority
 
@@ -282,7 +300,7 @@ Last updated: 2026-09-11
 - An operator-oriented usage manual is now part of dev docs (`docs/dev/WORKBENCH_OPERATOR_MANUAL.md`) to support structured UX-improvement proposals without requiring source-level inspection first.
 - Workbench UX now includes delayed inline mini-help tooltips for key controls (3-second hover/focus) so operators get contextual instructions without persistent visual noise.
 - Owner-admin shell navigation now supports metadata-defined nav icon codes (`surface_nav.icon`) and full admin module surface discovery through governed UI metadata.
-- Owner-admin module pages now use governed contract endpoints backed by tenant-scoped service objects, so each menu item has persistent DB-backed records and editable detail forms without introducing module-specific table sprawl.
+- Historical generic owner-admin service-object scaffolding from `v2_0031` is no longer authority for core administration. Tenant requests, Users & Access, Security, Settings, Audit and Data Catalogue bind to dedicated governed control contracts; Connections retains its own accepted integration runtime.
 
 ### 5) Owner-Admin Shell/Theming Authority
 
@@ -320,7 +338,8 @@ Last updated: 2026-09-11
 - Standard login UX is business-facing and tenant-code based; tenant-id override is not exposed in normal user flow.
 - OTP quick access is a real functional flow, not a placeholder.
 - TOTP setup is authenticator-QR driven (`otpauth://`), then verified by 6-digit code before elevated sign-in.
-- Request Access is a functional governed submission flow through `/api/public/tenant-requests` (accepted + reference code + delivery telemetry).
+- Request Access is a functional governed submission flow through `/api/public/tenant-requests`; accepted requests are persisted in `kernel.tenant_request` with a reference code and enter the Owner Admin review queue.
+- Approved onboarding uses a one-time `/api/public/tenant-bootstrap/complete` activation contract; the browser bootstrap token only selects that public activation flow and is never tenant authority.
 
 ### 9) Process Builder Authoring Contract
 
@@ -346,7 +365,21 @@ Last updated: 2026-09-11
 - Provider webhook verification is adapter-driven server-side. Stripe verification uses raw body + signature header + encrypted signing secret with timestamp tolerance. PayPal verification uses raw body + transmission headers + governed webhook ID + trusted PayPal certificate validation. Provider-specific rules do not enter generic React primitives.
 - The seven-step Connections UX remains metadata-composed: Identity, Endpoint, Security, Reliability, Routing & Mapping, Test & Health, Audit. Low-frequency provider/execution controls are disclosed through metadata-driven Advanced fields rather than hardcoded provider pages.
 - Dedicated permissions are fixed by operation class: read, write, secret manage, and test/execute. CSRF remains mandatory for mutations; recent OTP/TOTP assurance remains mandatory for secret mutation; capability metadata that lacks a real runtime consumer is not allowed to remain selectable.
+- `v2_0061` and `v2_0062` close operator-facing readiness and zero-pending capability truth; Connections is accepted/frozen unless a future regression or explicit new integration requirement is approved.
 - Reference execution contract: `docs/architecture/CONNECTION_EXECUTION_CAPABILITY_V1.md`.
+
+### 11) Owner Admin Control Plane
+
+- Owner Admin core control actions are served by dedicated `/api/eip/owner-admin/control/*` contracts; historical generic module Service Objects are not security or administration authority.
+- Tenant authority comes from the authenticated EIP session. Core control surfaces do not accept raw browser `tenant_id` authority, and tenant-owned settings remain within the existing RLS boundary.
+- Read/write permissions are separated by control area. Privileged writes require explicit permission, CSRF and strong recent assurance (`otp` or `totp`) before mutation.
+- Users & Access reads from the real authentication identity model, can create governed identities, link/unlink the optional primary `eip_core.agent`, activate/lock accounts and replace permission-code grants. Disabling/locking an identity revokes its active sessions, and self-access mutation is blocked.
+- Security control exposes real active sessions and browser-device trust. Administrators can revoke another session and set device trust to trusted/untrusted/revoked; revoking a device revokes its active sessions. The current session cannot revoke itself through the admin action.
+- Tenant Settings reads/writes `tenant.tenant_settings` through tenant transactions/RLS and accepts JSON object payloads only; connection credentials and other secret material remain outside this surface.
+- `security.audit_event` is the durable redacted evidence store for privileged administration actions. Audit responses expose business-safe event metadata, not secrets or full request bodies.
+- Data Catalogue exposes allowlisted schema/table/column metadata from `information_schema`; arbitrary row browsing is intentionally forbidden.
+- Onboarding is a governed pre-tenant lifecycle: public submission persists `kernel.tenant_request`; approval creates the organisation and initial admin identity in suspended/bootstrap state; one-time activation establishes the credential and activates the tenant; rejection records the review decision; resend rotates the pending bootstrap token. Expired links remain recoverable without creating a second tenant.
+- Owner Admin UI remains metadata-composed through registered generic primitives (`ContractTablePanel`, `ContractFlowStepEditor`, `ContractActionPanel`, layouts/tabs/metrics). The browser presents and submits governed contracts; it does not own access policy or business state.
 
 ## Process Engine Rules (Wave 3.5 baseline)
 
@@ -485,6 +518,7 @@ Last updated: 2026-09-11
 - Process/workbench route authorization must flow through centralized `app.requirePermission(...)`.
 - Permission codes are resolved from governed identity metadata (`eip_auth.auth_identity.attrs.permissions`) via the auth shell and enforced fail-closed.
 - Passing permission-code arrays into route guards is mandatory; placeholder/ignored permission arguments are forbidden.
+- Owner Admin control mutations must use the authenticated session tenant, explicit Owner Admin permission, CSRF and strong assurance; raw browser tenant UUID must never select mutation scope.
 
 ## Staging Deployment Baseline
 
