@@ -68,8 +68,14 @@ export const PROCESS_STUDIO_TRANSPORT_V1 = Object.freeze({
       method: "POST",
       path: "/api/eip/process/defs/:id/revisions",
       permission: ["PROCESS_DEF_WRITE", "CRM_PROCESS_DEF_WRITE"],
-      implemented: false,
       lifecycle: "published-to-new-draft",
+    }),
+    archive_process: operation({
+      studio: "process",
+      method: "POST",
+      path: "/api/eip/process/defs/:id/archive",
+      permission: ["PROCESS_DEF_WRITE", "CRM_PROCESS_DEF_WRITE"],
+      lifecycle: "draft-or-published-to-archived",
     }),
     list_task_templates: operation({
       studio: "process",
@@ -82,6 +88,7 @@ export const PROCESS_STUDIO_TRANSPORT_V1 = Object.freeze({
       method: "POST",
       path: "/api/eip/process/task-templates",
       permission: ["PROCESS_DEF_WRITE", "CRM_PROCESS_DEF_WRITE"],
+      lifecycle: "draft-only-target",
     }),
     list_bindings: operation({
       studio: "process",
@@ -94,6 +101,7 @@ export const PROCESS_STUDIO_TRANSPORT_V1 = Object.freeze({
       method: "POST",
       path: "/api/eip/process/bindings",
       permission: ["PROCESS_DEF_WRITE", "CRM_PROCESS_DEF_WRITE"],
+      lifecycle: "published-target-when-active",
     }),
     list_instances: operation({
       studio: "operator",
@@ -112,12 +120,14 @@ export const PROCESS_STUDIO_TRANSPORT_V1 = Object.freeze({
       method: "POST",
       path: "/api/eip/process/instances",
       permission: ["PROCESS_INSTANCE_WRITE", "CRM_PROCESS_DEF_WRITE"],
+      lifecycle: "published-active-only",
     }),
     advance_process: operation({
       studio: "operator",
       method: "POST",
       path: "/api/eip/process/instances/:id/advance",
       permission: ["PROCESS_INSTANCE_WRITE", "CRM_PROCESS_DEF_WRITE"],
+      lifecycle: "pinned-instance-definition",
     }),
     process_taxonomy: operation({
       studio: "process",
