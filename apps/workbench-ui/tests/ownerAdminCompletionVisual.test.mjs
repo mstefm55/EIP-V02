@@ -22,7 +22,8 @@ test("Owner Admin completion stylesheet loads after the shared stylesheet", () =
 
 test("Owner Admin completion rules stay scoped to the owner shell", () => {
   const css = read("src/ownerAdminCompletion.css");
-  const rules = css
+  const cssWithoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = cssWithoutComments
     .split("}")
     .map((chunk) => chunk.trim())
     .filter((chunk) => chunk.includes("{"));
