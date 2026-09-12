@@ -15,6 +15,10 @@ const sqlStatementPattern = /\bSELECT\b[\s\S]{0,900}?\bFROM\b|\bINSERT\s+INTO\b|
 const tenantScopePattern = /\b(tenantId|tenant_id|tenantScope|scopeTenant|withTenant|forTenant|tenantContext|ctx\.tenant|requestTenant|tenant\s*:\s*|orgId|accountId)\b/i;
 const globallyScopedPattern = /\b(information_schema|pg_catalog|to_regclass|schema_migrations|migration)\b|select\s+1\s+as\s+ok/i;
 const rawTenantSettingsPoolQueryPattern = /app\.db\.query\s*\([\s\S]{0,900}?tenant\.tenant_settings/i;
+const tenantRequestGlobalQueryPattern = /\bkernel\.tenant_request\b/i;
+const guardedTenantRequestControlPattern = /\brequire(?:Read|Write)\s*\(\s*app\s*,\s*req\s*,\s*reply\s*,\s*TENANT_REQUEST_(?:READ|WRITE)\b/i;
+const tenantRequestPublicRoute = path.join('services', 'api', 'src', 'routes', 'tenant_requests_public.js');
+const ownerAdminControlRoute = path.join('services', 'api', 'src', 'routes', 'owner_admin_control.js');
 const tenantSettingsRlsMigration = path.join('db', 'migrations', 'v2_0032_tenant_settings_force_rls.sql');
 
 function walk(dir) {
@@ -45,6 +49,26 @@ function isLikelySqlStatement(lines, index) {
   if (!sqlVerbStartPattern.test(line)) return false;
   const statementWindow = lines.slice(index, Math.min(lines.length, index + 10)).join('\n');
   return sqlStatementPattern.test(statementWindow);
+}
+
+function isGovernedGlobalTenantRequestAccess(rel, windowText) {
+  if (!tenantRequestGlobalQueryPattern.test(windowText)) return false;
+
+  // Public onboarding is the one legitimate pre-tenant write: there is no
+  // tenant to scope until the platform approves the request.
+  if (rel === tenantRequestPublicRoute) {
+    return /\bINSERT\s+INTO\s+kernel\.tenant_request\b/i.test(windowText);
+  }
+
+  // The global review queue is permitted only inside the guarded Owner Admin
+  // control route. Effective permission policy makes legacy tenant grants inert
+  // and bridges only explicit PLATFORM_TENANT_REQUEST_* authority to this
+  // compatibility contract.
+  if (rel === ownerAdminControlRoute) {
+    return guardedTenantRequestControlPattern.test(windowText);
+  }
+
+  return false;
 }
 
 const failures = [];
@@ -85,7 +109,7 @@ for (const abs of walk(root)) {
     const windowEnd = Math.min(lines.length, i + 21);
     const windowText = lines.slice(windowStart, windowEnd).join('\n');
 
-    if (globallyScopedPattern.test(windowText)) {
+    if (globallyScopedPattern.test(windowText) || isGovernedGlobalTenantRequestAccess(rel, windowText)) {
       continue;
     }
 
