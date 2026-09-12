@@ -72,6 +72,12 @@ function mapIdentity(row) {
     login_type: row.login_type,
     status: row.is_locked ? "locked" : row.is_active ? "active" : "inactive",
     permission_count: permissionCodes.length,
+    agent_linked: Boolean(row.agent_id),
+    agent_id: row.agent_id || null,
+    agent_code: row.agent_code || null,
+    agent_name: row.agent_name || null,
+    agent_type: row.agent_type || null,
+    parent_agent_id: row.parent_agent_id || null,
     updated_at: row.updated_at,
   };
 }
@@ -322,11 +328,40 @@ export default async function ownerAdminConsoleRoutes(app) {
 
       const result = await app.db.query(
         `
-        SELECT id, login, login_type, is_active, is_locked,
-               COALESCE(attrs, '{}'::jsonb) AS attrs, updated_at
-        FROM eip_auth.auth_identity
-        WHERE tenant_id = $1::uuid
-        ORDER BY lower(login), id
+        SELECT
+          identity.id,
+          identity.login,
+          identity.login_type,
+          identity.is_active,
+          identity.is_locked,
+          COALESCE(identity.attrs, '{}'::jsonb) AS attrs,
+          identity.updated_at,
+          linked_agent.agent_id,
+          linked_agent.agent_code,
+          linked_agent.agent_name,
+          linked_agent.agent_type,
+          linked_agent.parent_agent_id
+        FROM eip_auth.auth_identity AS identity
+        LEFT JOIN LATERAL (
+          SELECT
+            agent.id AS agent_id,
+            agent.code AS agent_code,
+            agent.name AS agent_name,
+            agent.agent_type,
+            agent.parent_agent_id
+          FROM eip_auth.auth_identity_agent AS identity_agent
+          JOIN eip_core.agent AS agent
+            ON agent.id = identity_agent.agent_id
+           AND agent.tenant_id = identity_agent.tenant_id
+          WHERE identity_agent.tenant_id = identity.tenant_id
+            AND identity_agent.identity_id = identity.id
+            AND identity_agent.is_active = true
+            AND agent.is_active = true
+          ORDER BY identity_agent.is_primary DESC, identity_agent.updated_at DESC, identity_agent.id
+          LIMIT 1
+        ) AS linked_agent ON true
+        WHERE identity.tenant_id = $1::uuid
+        ORDER BY lower(identity.login), identity.id
         LIMIT $2
         `,
         [session.tenant_id, limit]
@@ -335,6 +370,52 @@ export default async function ownerAdminConsoleRoutes(app) {
       return reply.send({ ok: true, items: result.rows.map(mapIdentity), total: result.rowCount });
     }
   );
+
+  app.get("/owner-admin/security/overview", async (req, reply) => {
+    const session = await requireRead(app, req, reply, SECURITY_READ);
+    if (!session) return;
+
+    const result = await app.db.query(
+      `
+      SELECT
+        (SELECT count(*)::int
+         FROM eip_auth.auth_session
+         WHERE tenant_id = $1::uuid
+           AND is_revoked = false
+           AND expires_at > now()) AS active_sessions,
+        (SELECT count(*)::int
+         FROM eip_auth.auth_device
+         WHERE tenant_id = $1::uuid
+           AND trust_state = 'trusted'
+           AND revoked_at IS NULL) AS trusted_devices,
+        (SELECT count(*)::int
+         FROM eip_auth.auth_device
+         WHERE tenant_id = $1::uuid
+           AND trust_state = 'untrusted'
+           AND revoked_at IS NULL) AS untrusted_devices,
+        (SELECT count(*)::int
+         FROM eip_auth.auth_device
+         WHERE tenant_id = $1::uuid
+           AND (trust_state = 'revoked' OR revoked_at IS NOT NULL)) AS revoked_devices,
+        (SELECT count(*)::int
+         FROM eip_auth.auth_identity
+         WHERE tenant_id = $1::uuid
+           AND is_active = true
+           AND is_locked = false) AS active_identities,
+        (SELECT count(*)::int
+         FROM eip_auth.auth_identity
+         WHERE tenant_id = $1::uuid
+           AND is_locked = true) AS locked_identities
+      `,
+      [session.tenant_id]
+    );
+
+    return reply.send({
+      ok: true,
+      metrics: result.rows[0] || {},
+      generated_at: new Date().toISOString(),
+    });
+  });
 
   app.get(
     "/owner-admin/security/sessions",
