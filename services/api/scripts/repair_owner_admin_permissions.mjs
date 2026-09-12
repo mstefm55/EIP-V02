@@ -4,7 +4,9 @@ import pg from "pg";
 import { resolveDbConfig } from "./migrationDbConfig.mjs";
 import {
   DEFAULT_BOOTSTRAP_PERMISSION_CODES,
-  mergeBootstrapPermissionCodes,
+  PLATFORM_CONTROL_PERMISSION_CODES,
+  buildOwnerAdminPermissionCodes,
+  normalizePermissionCodes,
 } from "./bootstrapPermissionProfile.mjs";
 
 function normalize(value) {
@@ -23,6 +25,7 @@ async function main() {
   const tenantCode = normalize(process.env.OWNER_ADMIN_REPAIR_TENANT_CODE);
   const login = normalize(process.env.OWNER_ADMIN_REPAIR_LOGIN);
   const apply = parseApply(process.env.OWNER_ADMIN_REPAIR_APPLY);
+  const includePlatformControl = parseApply(process.env.OWNER_ADMIN_REPAIR_PLATFORM_CONTROL);
 
   if (!tenantCode || !login) {
     throw new Error(
@@ -69,9 +72,13 @@ async function main() {
       throw new Error("Owner Admin repair target identity must be active and unlocked before permissions are repaired.");
     }
 
-    const before = readCanonicalPermissions(row.attrs);
-    const after = mergeBootstrapPermissionCodes(before);
-    const missing = DEFAULT_BOOTSTRAP_PERMISSION_CODES.filter((code) => !before.includes(code));
+    const before = normalizePermissionCodes(readCanonicalPermissions(row.attrs));
+    const after = buildOwnerAdminPermissionCodes(before, { includePlatformControl });
+    const missing = after.filter((code) => !before.includes(code));
+    const removed = before.filter((code) => !after.includes(code));
+    const required = includePlatformControl
+      ? [...DEFAULT_BOOTSTRAP_PERMISSION_CODES, ...PLATFORM_CONTROL_PERMISSION_CODES]
+      : DEFAULT_BOOTSTRAP_PERMISSION_CODES;
 
     if (!apply) {
       process.stdout.write(`${JSON.stringify({
@@ -81,7 +88,10 @@ async function main() {
         tenant_name: row.tenant_name,
         login: row.login,
         identity_id: row.id,
+        platform_control: includePlatformControl,
+        required_permission_codes: required,
         missing_permission_codes: missing,
+        removed_permission_codes: removed,
         resulting_permission_codes: after,
       }, null, 2)}\n`);
       return;
@@ -119,7 +129,9 @@ async function main() {
       tenant_name: row.tenant_name,
       login: row.login,
       identity_id: row.id,
+      platform_control: includePlatformControl,
       added_permission_codes: missing,
+      removed_permission_codes: removed,
       permission_codes: after,
     }, null, 2)}\n`);
   } catch (error) {
