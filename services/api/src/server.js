@@ -9,6 +9,7 @@ import dbPlugin from "./plugins/db.js";
 import authShellPlugin from "./plugins/authShell.js";
 import authTransportHardeningPlugin from "./plugins/authTransportHardening.js";
 import connectionActivationGuard from "./plugins/connectionActivationGuard.js";
+import processStudioLifecycleGuard from "./plugins/processStudioLifecycleGuard.js";
 import healthRoutes from "./routes/health.js";
 import authRoutes from "./routes/auth.js";
 import authSessionTransportRoutes from "./routes/auth_session_transport.js";
@@ -16,6 +17,7 @@ import authOrganisationRoutes from "./routes/auth_organisations.js";
 import tenantRequestsPublicRoutes from "./routes/tenant_requests_public.js";
 import publicConnectionRoutes from "./routes/public_connections.js";
 import coreProcessRoutes from "./routes/process/core_process.js";
+import processStudioLifecycleRoutes from "./routes/process/process_studio_lifecycle.js";
 import planningScheduleRoutes from "./routes/planning_schedule.js";
 import uiSurfaceRoutes from "./routes/ui_surface.js";
 import ownerAdminConsoleRoutes from "./routes/owner_admin_console.js";
@@ -224,6 +226,7 @@ async function buildServer(options = {}) {
   await app.register(authShellPlugin);
   await app.register(authTransportHardeningPlugin);
   await app.register(connectionActivationGuard);
+  await app.register(processStudioLifecycleGuard);
   app.decorate("coreProcess", { findActiveInstance, advanceInstance, updateTaskStatus, createInstance });
   await app.register(healthRoutes, { prefix: "/api/public" });
   await app.register(tenantRequestsPublicRoutes, { prefix: "/api/public" });
@@ -240,6 +243,8 @@ async function buildServer(options = {}) {
   await app.register(connectionEndpointRoutes, { prefix: "/api/eip" });
   await app.register(connectionReadinessRoutes, { prefix: "/api/eip" });
   await app.register(planningScheduleRoutes, { prefix: "/api/eip" });
+  await app.register(processStudioLifecycleRoutes, { prefix: "/api/eip/core" });
+  await app.register(processStudioLifecycleRoutes, { prefix: "/api/eip" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip/core" });
   await app.register(coreProcessRoutes, { prefix: "/api/eip" });
 
