@@ -86,17 +86,21 @@ Regression evidence also verifies that:
 
 `v2_0070` declares `surface_nav.requires_any_permission=["PLATFORM_TENANT_REQUEST_READ"]` and root `permissions_any` metadata for Tenant Requests. The current generic surface catalogue does not yet consume that navigation predicate, so API authorization is closed now while navigation filtering remains a generic UI-engine enhancement. Do not hardcode a Tenant Requests hide rule in `OwnerAdminShell`; the catalogue should consume the metadata predicate when that enhancement is implemented.
 
+## Production topology verified
+
+Railway production currently tracks `feature/route-temporal-gate-v1`, which is the base of Owner Admin PR #22. The PR topology is therefore intentional for the current production line and must not be casually retargeted to the highly diverged `main` branch.
+
+The production API pre-deploy command already runs migrations followed by the Owner Admin permission repair. `OWNER_ADMIN_REPAIR_PLATFORM_CONTROL=true` is configured for the intended production repair path with deployment skipped, so no production release was triggered by the configuration change.
+
 ## Remaining closure gates before production acceptance
 
 The code/governance gate is green, but production acceptance still requires:
 
 1. apply migrations on a fresh V2 database and confirm `v2_0070` executes cleanly;
 2. apply migrations on the existing Railway database using the immutable checksum ledger;
-3. configure the intended production platform operator with `OWNER_ADMIN_REPAIR_PLATFORM_CONTROL=true` before the repair step runs;
-4. smoke the real Request Access -> platform review -> bootstrap -> tenant login path;
-5. smoke ordinary tenant Owner Admin access and prove the global Tenant Requests queue is denied;
-6. smoke Users & Access, sessions/devices, Settings, Audit, and Data Catalogue against real production data;
-7. verify the PR/base branch topology before merge because the completion PR currently targets `feature/route-temporal-gate-v1`, not `main`;
-8. update the Developer Manual and deployment record with final production truth after those checks.
+3. smoke the real Request Access -> platform review -> bootstrap -> tenant login path;
+4. smoke ordinary tenant Owner Admin access and prove the global Tenant Requests queue is denied;
+5. smoke Users & Access, sessions/devices, Settings, Audit, and Data Catalogue against real production data;
+6. update the Developer Manual and deployment record with final production truth after those checks.
 
 Do not declare Owner Admin production-frozen until these production gates are complete.
