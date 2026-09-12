@@ -98,15 +98,11 @@ export default async function tenantBootstrapPublicRoutes(app) {
         }
         const expiresAt = new Date(requestRow.bootstrap_expires_at);
         if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
-          await client.query(
-            `
-            UPDATE kernel.tenant_request
-            SET status_code = 'EXPIRED', updated_at = now()
-            WHERE id = $1::uuid
-            `,
-            [requestRow.id]
-          );
-          await client.query("COMMIT");
+          // Keep the governed request in BOOTSTRAP_PENDING so the administrator can
+          // safely rotate the one-time token through the existing resend action.
+          // Marking the request EXPIRED here used to force it back through approval,
+          // which could create a second tenant for the same already-approved request.
+          await client.query("ROLLBACK");
           return reply.code(410).send({ ok: false, error: "BOOTSTRAP_TOKEN_EXPIRED" });
         }
         if (!requestRow.tenant_id || !requestRow.admin_identity_id) {
