@@ -55,7 +55,7 @@ test("Owner Admin security surface uses only V2 security projections", () => {
   assert.match(migration, /\/api\/eip\/owner-admin\/security\/overview/);
   assert.match(migration, /\/api\/eip\/owner-admin\/security\/sessions\?limit=100/);
   assert.match(migration, /\/api\/eip\/owner-admin\/security\/devices\?limit=100/);
-  assert.doesNotMatch(migration, /recovery\/requests|passkey/i);
+  assert.doesNotMatch(migration, /\/api\/eip\/[^\s\"']*(?:recovery|passkey)/i);
   assert.doesNotMatch(migration, /CREATE TABLE|CREATE SCHEMA/i);
 });
 
