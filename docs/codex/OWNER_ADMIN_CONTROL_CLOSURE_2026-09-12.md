@@ -82,6 +82,10 @@ Regression evidence also verifies that:
 - Tenant Requests surface metadata is bound to platform read/write authority;
 - the validator does not globally exempt `kernel.tenant_request`.
 
+## Metadata-driven visibility note
+
+`v2_0070` declares `surface_nav.requires_any_permission=["PLATFORM_TENANT_REQUEST_READ"]` and root `permissions_any` metadata for Tenant Requests. The current generic surface catalogue does not yet consume that navigation predicate, so API authorization is closed now while navigation filtering remains a generic UI-engine enhancement. Do not hardcode a Tenant Requests hide rule in `OwnerAdminShell`; the catalogue should consume the metadata predicate when that enhancement is implemented.
+
 ## Remaining closure gates before production acceptance
 
 The code/governance gate is green, but production acceptance still requires:
