@@ -385,7 +385,7 @@ export async function processStudioLifecyclePreHandler(app, req, reply) {
 
 async function processStudioLifecycleGuard(app) {
   app.addHook("preHandler", async (req, reply) => {
-    await processStudioLifecyclePreHandler(app, req, reply);
+    return processStudioLifecyclePreHandler(app, req, reply);
   });
 
   app.addHook("onSend", async (req, _reply, payload) => {
