@@ -83,7 +83,8 @@ SET tree = $json$
         },
         {
           "id":"owner_tenant_requests_actions",
-          "type":"Stack",
+          "type":"SplitLayout",
+          "props":{"columns":1,"min_column_width":"280px"},
           "children":[
             {
               "id":"owner_tenant_requests_primary_actions",
@@ -204,7 +205,8 @@ SET tree = $json$
         },
         {
           "id":"owner_users_controls",
-          "type":"Stack",
+          "type":"SplitLayout",
+          "props":{"columns":1,"min_column_width":"300px"},
           "children":[
             {
               "id":"owner_users_create",
@@ -251,7 +253,7 @@ SET tree = $json$
                   {"key":"is_active","path":"is_active","label":"Active","type":"checkbox"},
                   {"key":"is_locked","path":"is_locked","label":"Locked","type":"checkbox"},
                   {"key":"permissions","path":"permissions","label":"Permission codes","type":"string_list","rows":8,"help":"One permission code per line."},
-                  {"key":"agent_id","path":"agent_id","label":"Primary Agent","type":"select","options_path":"items","option_value_key":"id","option_label_key":"label","omit_empty":true}
+                  {"key":"agent_id","path":"agent_id","label":"Primary Agent","type":"select","options_path":"items","option_value_key":"id","option_label_key":"label"}
                 ]
               }
             }
@@ -318,7 +320,8 @@ SET tree = $json$
       "children":[
         {
           "id":"owner_security_session_stack",
-          "type":"Stack",
+          "type":"SplitLayout",
+          "props":{"columns":1,"min_column_width":"300px"},
           "children":[
             {
               "id":"owner_security_sessions",
@@ -367,7 +370,8 @@ SET tree = $json$
         },
         {
           "id":"owner_security_device_stack",
-          "type":"Stack",
+          "type":"SplitLayout",
+          "props":{"columns":1,"min_column_width":"300px"},
           "children":[
             {
               "id":"owner_security_devices",
@@ -598,10 +602,10 @@ WHERE tenant_id IS NULL AND version = 1 AND code = 'owner_data_explorer';
 -- server-tenant-scoped contracts and must not carry raw browser tenant UUIDs.
 DO $$
 DECLARE
-  code text;
+  surface_code text;
   surface_tree jsonb;
 BEGIN
-  FOREACH code IN ARRAY ARRAY[
+  FOREACH surface_code IN ARRAY ARRAY[
     'owner_tenant_requests',
     'owner_users_roles',
     'owner_security',
@@ -610,19 +614,24 @@ BEGIN
     'owner_data_explorer'
   ]
   LOOP
-    SELECT tree INTO surface_tree
-    FROM eip_core.ui_surface
-    WHERE tenant_id IS NULL AND version = 1 AND eip_core.ui_surface.code = code
+    SELECT surface.tree INTO surface_tree
+    FROM eip_core.ui_surface AS surface
+    WHERE surface.tenant_id IS NULL
+      AND surface.version = 1
+      AND surface.code = surface_code
     LIMIT 1;
 
     IF surface_tree IS NULL THEN
-      RAISE EXCEPTION 'v2_0069 missing Owner Admin surface %', code;
+      RAISE EXCEPTION 'v2_0069 missing Owner Admin surface %', surface_code;
     END IF;
     IF surface_tree::text LIKE '%"tenant_id"%' THEN
-      RAISE EXCEPTION 'v2_0069 raw browser tenant authority detected in surface %', code;
+      RAISE EXCEPTION 'v2_0069 raw browser tenant authority detected in surface %', surface_code;
     END IF;
     IF NOT (surface_tree::text LIKE '%/api/eip/owner-admin/control/%') THEN
-      RAISE EXCEPTION 'v2_0069 surface % is not bound to governed control contracts', code;
+      RAISE EXCEPTION 'v2_0069 surface % is not bound to governed control contracts', surface_code;
+    END IF;
+    IF surface_tree::text LIKE '%"type":"Stack"%' THEN
+      RAISE EXCEPTION 'v2_0069 unsupported Stack primitive detected in surface %', surface_code;
     END IF;
   END LOOP;
 
