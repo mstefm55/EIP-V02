@@ -22,11 +22,13 @@ export function resolveProcessLifecycle(attrs = {}) {
   const source = cloneAttrs(attrs);
   const explicit = normalizeText(source.lifecycle_status || source.lifecycleStatus);
   if (VALID_LIFECYCLE.has(explicit)) return explicit;
-  if (source.is_published === true || source.isPublished === true) {
-    return PROCESS_LIFECYCLE.PUBLISHED;
-  }
+  // Archived wins over legacy publication flags. This keeps retired definitions
+  // fail-closed when an old row happens to carry both compatibility flags.
   if (source.is_archived === true || source.isArchived === true) {
     return PROCESS_LIFECYCLE.ARCHIVED;
+  }
+  if (source.is_published === true || source.isPublished === true) {
+    return PROCESS_LIFECYCLE.PUBLISHED;
   }
   return PROCESS_LIFECYCLE.DRAFT;
 }
@@ -67,7 +69,9 @@ export function buildProcessDraftAttrs(attrs = {}, options = {}) {
   next.is_published = false;
   delete next.is_archived;
   delete next.published_at;
+  delete next.published_by_identity_id;
   delete next.archived_at;
+  delete next.archived_by_identity_id;
 
   if (options.revision_of_process_def_id) {
     next.revision_of_process_def_id = String(options.revision_of_process_def_id);
@@ -87,6 +91,8 @@ export function buildProcessPublishedAttrs(attrs = {}, options = {}) {
   next.lifecycle_status = PROCESS_LIFECYCLE.PUBLISHED;
   next.is_published = true;
   delete next.is_archived;
+  delete next.archived_at;
+  delete next.archived_by_identity_id;
   next.published_at = options.published_at || new Date().toISOString();
   if (options.published_by_identity_id) {
     next.published_by_identity_id = String(options.published_by_identity_id);
