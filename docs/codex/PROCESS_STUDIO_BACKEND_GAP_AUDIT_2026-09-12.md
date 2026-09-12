@@ -1,59 +1,49 @@
 # Process Studio Backend Gap Audit — 2026-09-12
 
-Branch audited: `feature/route-temporal-gate-v1` at `b9eb19355cbc54ebe86cec833bfc8b7476daf369`
+Base audited: `feature/route-temporal-gate-v1` at `b9eb19355cbc54ebe86cec833bfc8b7476daf369`
 
-Purpose: prepare EIP Core V2 for later integration of the Process Studio UI being developed separately in Google AI Studio. This audit does not modify that WIP UI.
+Preparation branch: `prep/process-studio-integration-v1`
+
+Purpose: prepare EIP Core V2 for later integration of the Process Studio UI being developed separately in Google AI Studio. The Google WIP UI remains frozen; this work closes the backend adapter/lifecycle contract first.
 
 ## Summary
 
-The backend is not starting from zero. Process Studio already has a substantial governed runtime surface. The remaining work is primarily lifecycle/tenant-contract hardening and adapter stabilization, not another Process Engine.
+The Process Studio backend preparation is now closed at the contract/governance layer without creating a second Process Engine or a new Process feature table. Existing V2 Process structures remain authoritative.
 
 | Area | Status | Evidence / action |
 | --- | --- | --- |
-| Process catalogue | READY | `/process/workbench/catalog` projects graph summaries, task labels, macros, effect references and runtime counts |
-| Process detail | READY | `/process/workbench/defs/:id` returns definition + task templates + bindings + recent instances |
-| Draft create/update | PARTIAL | create/update routes exist; explicit immutable-published semantics not yet enforced |
-| Validation | READY / SHAPE GAP | server validation exists and covers graph/macro/effect/task-template governance; response is still a string error list |
-| Publish | PARTIAL | validation-before-publish exists; publish currently mutates the same row in place |
-| Draft revision | GAP | no canonical `published -> new draft version` operation yet |
-| Runtime version pinning | READY | `process_instance.process_def_id` pins the exact definition row |
-| Runtime published-only selection | GAP | explicit ID/code and binding resolution do not consistently require published lifecycle state |
-| Process tenant default | READY | legacy routes default to authenticated `session.tenant_id` |
-| Raw tenant override | GAP | several legacy Process routes still accept browser `tenant_id` UUID input |
-| Task templates | READY | governed CRUD/list contracts exist and validation resolves human-task references |
-| Bindings | READY | governed process-binding contracts exist |
-| Operator runtime | READY | instances can be listed, loaded, started and advanced through Process Engine routes |
-| Effect catalogue | READY | effect authority is `PROCESS_EFFECT_TYPE`; macros reference governed effects |
-| Inline transition effects | CLOSED | validator rejects inline transition effect bundles |
-| Reasoning runtime | READY FOUNDATION | governed reasoning/macro bridge exists; Studio authoring adapter still needs formal transport mapping |
-| UI Studio backend foundation | READY FOUNDATION | `ui_surface` + code-owned renderer/primitive registry already exist; Studio lifecycle adapter still needs formal mapping |
-| New Process table | NOT REQUIRED | existing versioned `process_def` and related governed structures are sufficient for V1 |
+| Process catalogue | READY | `/process/workbench/catalog` remains the governed catalogue projection |
+| Process detail | READY | `/process/workbench/defs/:id` remains the governed detail projection |
+| Draft create/update | CLOSED | lifecycle guard strips/rejects lifecycle escalation and published/archived content is immutable |
+| Validation | CLOSED | canonical string errors remain intact and structured Studio `issues[]` are projected for UI consumption |
+| Publish | CLOSED | publish remains server-validation-gated; `v2_0063` canonicalizes the persisted published lifecycle |
+| Draft revision | CLOSED | `POST /process/defs/:id/revisions` creates a new draft version using existing `process_def` rows |
+| Runtime version pinning | READY | `process_instance.process_def_id` continues to pin the exact selected definition row |
+| Runtime published-only start | CLOSED | HTTP start pins a server-selected published definition; DB guard rejects any non-published/inactive definition insert |
+| Process tenant authority for Studio adapter | CLOSED | transport contract is session-owned and does not expose raw `tenant_id` authority |
+| Legacy raw tenant compatibility | BOUNDED | legacy Process routes still accept same-session tenant UUID compatibility input and fail closed cross-tenant; accepted Studio adapter must not send it |
+| Task templates | CLOSED | CRUD remains existing; `v2_0063` prevents mutation when parent Process Definition is published/archived |
+| Bindings | CLOSED | active binding target must be active + published; revision clones remain inert until publication |
+| Operator runtime | READY | instances list/load/start/advance continue through the canonical Process Engine |
+| Effect catalogue | READY | effect authority remains `PROCESS_EFFECT_TYPE` |
+| Inline transition effects | CLOSED | canonical validator still rejects inline transition effect bundles |
+| Reasoning runtime | READY FOUNDATION | governed reasoning/macro bridge remains the runtime authority |
+| UI Studio backend foundation | READY FOUNDATION | `ui_surface` + code-owned renderer/primitive registry remain authoritative |
+| New Process table | NOT REQUIRED | lifecycle/versioning/revision fit existing `process_def`, `task_template`, `process_binding`, `process_instance` structures |
 
-## Findings
+## Closed findings
 
-### 1. Existing Process authoring projection is strong
+### 1. Existing Process authoring projection is retained
 
-`buildProcessWorkbenchProjection(...)` already derives a Studio-friendly projection from `process_def.graph` and `attrs`, including:
+`buildProcessWorkbenchProjection(...)` remains the authoring/read projection for definitions. The integration layer augments responses with canonical lifecycle status rather than rebuilding Process interpretation in React.
 
-- nodes;
-- transitions;
-- task labels;
-- macro summaries;
-- canonical effect references;
-- object type/category;
-- module;
-- publication flag;
-- graph summary counts.
+The Google adapter must consume EIP projections and must not promote its mock models to persistence authority.
 
-`loadProcessWorkbenchCounts(...)` adds task-template, binding, total-instance and active-instance counts.
+### 2. Validation authority remains EIP
 
-This should be reused by the Google adapter rather than rebuilding the same interpretation in React.
+`validateProcessGraph(...)` remains the server-side publication authority for:
 
-### 2. Validation authority already belongs to EIP
-
-`validateProcessGraph(...)` already validates major canonical rules:
-
-- graph/initial node;
+- graph / initial-node correctness;
 - node and edge taxonomy;
 - process actions;
 - transition macro references;
@@ -65,83 +55,126 @@ This should be reused by the Google adapter rather than rebuilding the same inte
 - document governance;
 - human-task template references.
 
-Therefore Google Studio validation should be optimistic/presentational only; publish must continue to use server validation.
+For Studio usability, the response layer now adds structured `issues[]` while preserving the canonical server `errors[]`/`details[]` strings.
 
-### 3. Published rows are not immutable yet
+### 3. Process Definition lifecycle is explicit and immutable
 
-Current `PATCH /process/defs/:id` updates graph/attrs/name on the selected row regardless of publication state.
-
-Current `POST /process/defs/:id/publish` validates then changes `attrs.is_published=true` on that same row.
-
-Target:
+Canonical persisted states are:
 
 ```text
-draft vN -> validate -> publish vN (immutable)
-published vN -> create draft revision vN+1 -> edit -> validate -> publish
+draft
+published
+archived
 ```
 
-The new lifecycle helper on `prep/process-studio-integration-v1` defines this target without schema expansion.
+`v2_0063_process_definition_lifecycle_governance.sql` normalizes legacy rows and installs persistence guards without a new feature table.
 
-### 4. Runtime does not yet fail closed on draft definitions
-
-`createInstance(...)` can resolve Process Definitions by:
-
-- explicit `process_def_id`;
-- process code/version;
-- `process_binding`.
-
-The current lookups require tenant scope and, for binding resolution, active status, but do not consistently require published lifecycle state.
-
-This must be corrected before Google Studio can create real drafts safely; otherwise a saved-but-unpublished draft could become executable.
-
-### 5. Runtime pinning itself is already correct
-
-A Process Instance stores the selected `process_def_id` and later advancement reloads that exact definition ID.
-
-That means once published-only selection is enforced, the architecture already supports:
+Target behavior is now:
 
 ```text
-instance started on v1 -> stays on v1
-publish v2 -> new instances may select v2
+draft vN
+  -> edit task/process metadata
+  -> validate
+  -> publish vN
+  -> immutable definition + task templates
+
+published vN
+  -> create draft revision vN+1
+  -> edit
+  -> validate
+  -> publish vN+1
 ```
 
-No new snapshot table is required for this aspect.
+Operational `is_active` may still be toggled on a published definition without changing its immutable definition content.
 
-### 6. Browser tenant UUID should disappear from the Studio adapter
+### 4. Draft revision clones the version-owned execution contract
 
-Legacy Process routes accept optional `tenant_id` values and compare them with the session tenant. This is fail-closed for cross-tenant access, but the Google Studio adapter should not depend on that field.
+`POST /api/eip/process/defs/:id/revisions`:
 
-First integration contract:
+- requires authenticated EIP write permission + CSRF;
+- uses session tenant authority only;
+- accepts a published source definition;
+- serializes version allocation with a transaction advisory lock;
+- creates a new draft `process_def` row;
+- clones Task Templates because they participate in the pinned version's runtime behavior;
+- clones bindings as inactive deployment candidates;
+- marks only formerly active cloned bindings for activation when the new revision is published.
+
+This prevents a published vN from changing because a Task Template was edited later.
+
+### 5. Runtime selection fails closed on drafts/archives
+
+Process Instance rows can only be inserted when the selected Process Definition is active and published.
+
+For browser/API starts, the lifecycle guard resolves the currently eligible published definition and pins its exact `process_def_id` before the existing engine start path runs. Therefore a newer draft cannot accidentally supersede the current published version.
+
+Active Process Bindings are also restricted to active published definitions.
+
+Existing Process Instances are intentionally unaffected: advancement continues to load the exact historical `process_def_id` already pinned on the instance, including after that definition is later archived.
+
+### 6. Archive is deployment retirement, not history deletion
+
+`POST /api/eip/process/defs/:id/archive`:
+
+- requires write permission + CSRF;
+- uses the authenticated session tenant;
+- marks the definition archived/inactive;
+- deactivates its bindings;
+- does not rewrite or delete historical Process Instances.
+
+### 7. Studio tenant contract is session-owned
+
+The accepted adapter contract remains:
 
 ```text
-Studio browser -> authenticated session -> session tenant
+Studio browser
+  -> authenticated EIP session
+  -> server-owned session tenant
+  -> governed Process routes
 ```
 
-If Owner Admin later needs cross-tenant Process Studio selection, use a server-provided tenant-code/handle catalogue and server resolution, not a raw UUID field.
+`PROCESS_STUDIO_TRANSPORT_V1.raw_tenant_id_allowed` remains `false`.
 
-## Prep branch changes
+The old Process route compatibility layer still accepts a same-session UUID in some endpoints, but that is not part of the Studio adapter contract and cross-tenant input remains fail-closed. It can be retired independently after all legacy callers are migrated.
 
-The preparation branch adds:
+## Files added/changed in preparation
 
 - `docs/architecture/PROCESS_STUDIO_INTEGRATION_CONTRACT_V1.md`
+- `docs/codex/PROCESS_STUDIO_BACKEND_GAP_AUDIT_2026-09-12.md`
+- `db/migrations/v2_0063_process_definition_lifecycle_governance.sql`
+- `services/api/src/plugins/processStudioLifecycleGuard.js`
+- `services/api/src/routes/process/process_studio_lifecycle.js`
 - `services/api/src/services/process/processDefinitionLifecycle.js`
 - `services/api/src/services/process/processStudioTransportContract.js`
-- lifecycle unit tests;
-- transport-contract unit tests.
+- `services/api/src/services/process/processValidationIssues.js`
+- Process Studio lifecycle/transport/validation regression tests.
 
-These additions intentionally do not modify the Google AI Studio WIP or deploy a new Process UI.
+## Governance evidence
 
-## Next backend closure sequence
+GitHub Actions `V2 Security Governance Gates` run `34694646970` passed on the preparation branch before final documentation closeout. It covered:
 
-1. Wire lifecycle helper into Process Definition create/update/publish paths.
-2. Add canonical `create draft revision` operation using existing `process_def` rows.
-3. Block mutation of published/archived definitions.
-4. Enforce published-only runtime selection for explicit ID/code/binding resolution.
-5. Preserve already-started instances by exact `process_def_id`.
-6. Add structured validation issue projection while preserving canonical error codes.
-7. Add session-owned Studio-facing tests that never send `tenant_id`.
-8. Run complete API/security/tenant/process governance gates.
-9. Only then map the accepted Google WIP mock adapter to EIP transport.
+- full API unit regression;
+- Workbench UI unit tests;
+- Workbench build;
+- primitive Effect V1 validation;
+- Owner Admin governance;
+- security controls;
+- tenant scope;
+- process governance.
+
+Any later documentation-only or guard-corrective commit must still finish with the same gates green before merge.
+
+## Remaining integration work
+
+Backend preparation is no longer waiting on lifecycle/versioning semantics. The next Process Studio step is UI adapter cutover after the Google AI Studio WIP is accepted:
+
+```text
+Google mock adapter
+  -> EIP ProcessStudioTransport implementation
+  -> governed EIP endpoints
+```
+
+The cutover must not import Google mock persistence, raw tenant UUID authority, executable JavaScript metadata, arbitrary CSS, or a second Process runtime.
 
 ## Freeze rule
 
