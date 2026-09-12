@@ -19,7 +19,7 @@ test("Process Studio transport contract is session-tenant authoritative", () => 
   }
 });
 
-test("implemented adapter surface covers library, process and operator workflows", () => {
+test("implemented adapter surface covers library, process, lifecycle and operator workflows", () => {
   const operations = listProcessStudioOperations();
   const studios = new Set(operations.map((entry) => entry.studio));
 
@@ -34,6 +34,8 @@ test("implemented adapter surface covers library, process and operator workflows
     "update_process_draft",
     "validate_process",
     "publish_process",
+    "create_draft_revision",
+    "archive_process",
     "list_task_templates",
     "list_bindings",
     "list_instances",
@@ -47,22 +49,20 @@ test("implemented adapter surface covers library, process and operator workflows
   }
 });
 
-test("draft revision operation is explicit but not falsely advertised as implemented", () => {
-  const operation = getProcessStudioOperation("create_draft_revision");
-  assert.ok(operation);
-  assert.equal(operation.implemented, false);
-  assert.equal(operation.lifecycle, "published-to-new-draft");
-
+test("draft revision and archive lifecycle are explicit transport operations", () => {
+  const revision = getProcessStudioOperation("create_draft_revision");
+  assert.ok(revision);
+  assert.equal(revision.implemented, true);
+  assert.equal(revision.lifecycle, "published-to-new-draft");
   assert.equal(
     listProcessStudioOperations().some((entry) => entry.code === "create_draft_revision"),
-    false
-  );
-  assert.equal(
-    listProcessStudioOperations({ includePlanned: true }).some(
-      (entry) => entry.code === "create_draft_revision"
-    ),
     true
   );
+
+  const archive = getProcessStudioOperation("archive_process");
+  assert.ok(archive);
+  assert.equal(archive.implemented, true);
+  assert.equal(archive.lifecycle, "draft-or-published-to-archived");
 });
 
 test("Process Studio writes remain permission-governed", () => {
@@ -70,6 +70,8 @@ test("Process Studio writes remain permission-governed", () => {
     "create_process_draft",
     "update_process_draft",
     "publish_process",
+    "create_draft_revision",
+    "archive_process",
     "create_task_template",
     "create_binding",
     "start_process",
