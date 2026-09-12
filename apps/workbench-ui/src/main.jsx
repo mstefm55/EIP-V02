@@ -4,6 +4,7 @@ import App from "./App.jsx";
 import TenantBootstrapPanel from "./components/shell/TenantBootstrapPanel.jsx";
 import "./styles.css";
 import "./ownerAdminCompletion.css";
+import "./ownerAdminCascadeFix.css";
 
 function readBootstrapToken() {
   const params = new URLSearchParams(window.location.search);

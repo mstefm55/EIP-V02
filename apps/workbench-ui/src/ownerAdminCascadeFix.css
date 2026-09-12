@@ -1,0 +1,13 @@
+/*
+ * Owner Admin cascade correction.
+ *
+ * The shared V2 stylesheet paints a light `.owner-sidebar::before` layer.
+ * Owner Admin completion deliberately replaces the sidebar with the dark
+ * control-plane treatment, so the shared pseudo-element must not remain on
+ * top of that background. Keep this scoped to `.owner-shell`.
+ */
+
+.owner-shell .owner-sidebar::before {
+  content: none;
+  display: none;
+}
