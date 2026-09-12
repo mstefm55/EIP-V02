@@ -4,8 +4,8 @@ BEGIN;
 --
 -- Reuses the useful V1 security-overview pattern (compact posture metrics +
 -- operational lists) but binds exclusively to V2 Auth/session/device DTOs.
--- Recovery/passkey mutation is intentionally not copied from V1 until the V2
--- security contract explicitly supports it.
+-- Additional privileged mutations remain deferred until their V2 security
+-- contracts are explicitly enabled.
 --
 -- No secret material and no new table.
 
@@ -195,15 +195,6 @@ SET tree = $json$
           }
         }
       ]
-    },
-    {
-      "id": "owner_security_boundary",
-      "type": "NoticePanel",
-      "props": {
-        "eyebrow": "Security controls",
-        "title": "Protected actions remain server governed",
-        "message": "Credential recovery, passkey administration, trust changes and other privileged actions are not inferred from this dashboard. They return only through dedicated V2 security contracts and step-up policy."
-      }
     }
   ]
 }
