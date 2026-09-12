@@ -10,7 +10,8 @@ const serverSource = read("src/server.js");
 const controlSource = read("src/routes/owner_admin_control.js");
 const bootstrapSource = read("src/routes/tenant_bootstrap_public.js");
 const publicRequestSource = read("src/routes/tenant_requests_public.js");
-const migration = read("../../db/migrations/v2_0069_owner_admin_control_surface_closure.sql");
+const surfaceMigration = read("../../db/migrations/v2_0069_owner_admin_control_surface_closure.sql");
+const authorityMigration = read("../../db/migrations/v2_0070_owner_admin_platform_authority_boundary.sql");
 const workbenchEntry = read("../../apps/workbench-ui/src/main.jsx");
 
 test("Owner Admin control and bootstrap routes are registered", () => {
@@ -34,14 +35,15 @@ test("privileged Owner Admin writes require permission, CSRF and strong assuranc
   assert.match(controlSource, /OWNER_ADMIN_SECURITY_WRITE/);
   assert.match(controlSource, /OWNER_ADMIN_SETTINGS_WRITE/);
   assert.match(controlSource, /OWNER_ADMIN_TENANT_REQUEST_WRITE/);
+  assert.match(authorityMigration, /PLATFORM_TENANT_REQUEST_WRITE/);
 });
 
 test("expired bootstrap links remain recoverable through resend instead of creating a second tenant", () => {
   assert.match(bootstrapSource, /BOOTSTRAP_TOKEN_EXPIRED/);
   assert.match(bootstrapSource, /Keep the governed request in BOOTSTRAP_PENDING/);
   assert.doesNotMatch(bootstrapSource, /SET status_code = 'EXPIRED'/);
-  assert.match(migration, /v2_0069_expired_bootstrap_recovery/);
-  assert.match(migration, /status_code = 'BOOTSTRAP_PENDING'/);
+  assert.match(surfaceMigration, /v2_0069_expired_bootstrap_recovery/);
+  assert.match(surfaceMigration, /status_code = 'BOOTSTRAP_PENDING'/);
 });
 
 test("the public workbench entrypoint renders activation links before authenticated App", () => {
@@ -59,7 +61,7 @@ test("Owner Admin core surfaces bind to governed server-scoped control contracts
     "owner_audit",
     "owner_data_explorer",
   ]) {
-    assert.match(migration, new RegExp(surface));
+    assert.match(surfaceMigration, new RegExp(surface));
   }
 
   for (const contract of [
@@ -71,15 +73,22 @@ test("Owner Admin core surfaces bind to governed server-scoped control contracts
     "/owner-admin/control/audit",
     "/owner-admin/control/schema-catalog",
   ]) {
-    assert.ok(migration.includes(contract), `missing control contract ${contract}`);
+    assert.ok(surfaceMigration.includes(contract), `missing control contract ${contract}`);
   }
 
-  assert.match(migration, /raw browser tenant authority detected/);
-  assert.doesNotMatch(migration, /\/owner-admin\/control\/[^"']*\?tenant_id=/);
+  assert.match(surfaceMigration, /raw browser tenant authority detected/);
+  assert.doesNotMatch(surfaceMigration, /\/owner-admin\/control\/[^"']*\?tenant_id=/);
+});
+
+test("Tenant Requests surface is declared as platform control-plane authority", () => {
+  assert.match(authorityMigration, /PLATFORM_TENANT_REQUEST_READ/);
+  assert.match(authorityMigration, /PLATFORM_TENANT_REQUEST_WRITE/);
+  assert.match(authorityMigration, /requires_any_permission/);
+  assert.match(authorityMigration, /owner_tenant_requests/);
 });
 
 test("Data Catalogue stays metadata-only rather than exposing arbitrary tenant rows", () => {
   assert.match(controlSource, /row_data_exposed: false/);
   assert.match(controlSource, /information_schema\.columns/);
-  assert.match(migration, /Schema inspection only/);
+  assert.match(surfaceMigration, /Schema inspection only/);
 });
