@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { withTenantTransaction } from "../db/tenantTransaction.js";
+import { buildPermissionDecision, normalizePermissionCodes } from "../security/permissionPolicy.js";
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -12,6 +13,25 @@ function normalizeOptionalText(value) {
 
 function normalizeRealm(value, fallback = "EIP") {
   return normalizeOptionalText(value) || fallback;
+}
+
+export function getSurfaceRequiredPermissions(surfaceOrAttrs) {
+  const attrs = surfaceOrAttrs?.attrs && typeof surfaceOrAttrs.attrs === "object"
+    ? surfaceOrAttrs.attrs
+    : surfaceOrAttrs && typeof surfaceOrAttrs === "object"
+      ? surfaceOrAttrs
+      : {};
+  const surfaceNav = attrs.surface_nav && typeof attrs.surface_nav === "object"
+    ? attrs.surface_nav
+    : {};
+  return normalizePermissionCodes(surfaceNav.requires_any_permission);
+}
+
+export function surfaceMetadataAllows(surfaceOrAttrs, grantedPermissions = []) {
+  return buildPermissionDecision({
+    requiredPermissions: getSurfaceRequiredPermissions(surfaceOrAttrs),
+    grantedPermissions,
+  }).ok;
 }
 
 const OWNER_SHELL_FALLBACK_PROFILE_CODE = "EIP_CORE_STANDARD";
@@ -510,7 +530,12 @@ async function fetchSurface(app, { code, tenantId, publicOnly, realm }) {
   return r.rows[0] || null;
 }
 
-async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
+export async function fetchSurfaceCatalog(app, {
+  tenantId,
+  publicOnly,
+  realm,
+  grantedPermissions = [],
+}) {
   const resolvedRealm = normalizeRealm(realm);
   const params = [resolvedRealm];
   let tenantFilter = "tenant_id IS NULL";
@@ -573,6 +598,7 @@ async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
       code,
       title,
       version,
+      attrs,
       nav_label,
       nav_order,
       is_default,
@@ -592,23 +618,25 @@ async function fetchSurfaceCatalog(app, { tenantId, publicOnly, realm }) {
     params
   );
 
-  return r.rows.map((row) => ({
-    code: row.code,
-    title: row.title || row.nav_label || row.code,
-    nav_label: row.nav_label || row.title || row.code,
-    nav_order: Number.parseInt(String(row.nav_order ?? "1000"), 10) || 1000,
-    is_default: row.is_default === true,
-    asset_key: row.asset_key || null,
-    nav_icon: row.nav_icon || null,
-    is_enabled: row.nav_enabled !== false,
-    nav_hint: row.nav_hint || null,
-    module: row.module || null,
-    surface_kind: row.surface_kind || null,
-    realm: row.realm || resolvedRealm,
-    version: Number.parseInt(String(row.version ?? ""), 10) || null,
-    created_at: row.created_at || null,
-    updated_at: row.updated_at || null,
-  }));
+  return r.rows
+    .filter((row) => surfaceMetadataAllows(row.attrs, grantedPermissions))
+    .map((row) => ({
+      code: row.code,
+      title: row.title || row.nav_label || row.code,
+      nav_label: row.nav_label || row.title || row.code,
+      nav_order: Number.parseInt(String(row.nav_order ?? "1000"), 10) || 1000,
+      is_default: row.is_default === true,
+      asset_key: row.asset_key || null,
+      nav_icon: row.nav_icon || null,
+      is_enabled: row.nav_enabled !== false,
+      nav_hint: row.nav_hint || null,
+      module: row.module || null,
+      surface_kind: row.surface_kind || null,
+      realm: row.realm || resolvedRealm,
+      version: Number.parseInt(String(row.version ?? ""), 10) || null,
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+    }));
 }
 
 function sendSurface(req, reply, surface, cacheControl) {
@@ -680,7 +708,8 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
         const items = await fetchSurfaceCatalog(app, {
           tenantId,
           publicOnly: true,
-          realm
+          realm,
+          grantedPermissions: [],
         });
         return sendSurfaceCatalog(req, reply, {
           items,
@@ -725,7 +754,7 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
           publicOnly: true,
           realm,
         });
-        if (!surface) {
+        if (!surface || !surfaceMetadataAllows(surface, [])) {
           return reply.code(404).send({ ok: false, error: "SURFACE_NOT_FOUND" });
         }
 
@@ -750,6 +779,7 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
       tenantId: s.session.tenant_id,
       publicOnly: false,
       realm,
+      grantedPermissions: s.session.permission_codes,
     });
 
     return sendSurfaceCatalog(req, reply, {
@@ -785,7 +815,7 @@ export default async function uiSurfaceRoutes(app, opts = {}) {
         publicOnly: false,
         realm,
       });
-      if (!surface) {
+      if (!surface || !surfaceMetadataAllows(surface, s.session.permission_codes)) {
         return reply.code(404).send({ ok: false, error: "SURFACE_NOT_FOUND" });
       }
 
