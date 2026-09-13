@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   OWNER_ADMIN_PERMISSION_CODES,
+  hasPlatformControlPermissionCodes,
   validateTenantManagedPermissionCodes,
 } from "../src/routes/owner_admin_control.js";
 
@@ -21,6 +22,11 @@ test("new tenant Owner Admin defaults contain no platform or retired global queu
   assert.equal(OWNER_ADMIN_PERMISSION_CODES.some((code) => code.startsWith("PLATFORM_")), false);
   assert.equal(OWNER_ADMIN_PERMISSION_CODES.includes("OWNER_ADMIN_TENANT_REQUEST_READ"), false);
   assert.equal(OWNER_ADMIN_PERMISSION_CODES.includes("OWNER_ADMIN_TENANT_REQUEST_WRITE"), false);
+});
+
+test("platform-managed identities are detected from normalized explicit platform permissions", () => {
+  assert.equal(hasPlatformControlPermissionCodes([" platform_tenant_request_read "]), true);
+  assert.equal(hasPlatformControlPermissionCodes(["OWNER_ADMIN_ACCESS_WRITE"]), false);
 });
 
 test("tenant user management accepts normalized permissions already held by the actor", () => {
@@ -92,5 +98,13 @@ test("both tenant user create and update routes validate delegated permissions b
   assert.match(
     routeSource,
     /reply\.code\(403\)\.send\(\{ ok: false, error: permissionDecision\.error \}\)/
+  );
+});
+
+test("tenant Users & Access cannot mutate an identity carrying platform authority", () => {
+  assert.match(routeSource, /platform_managed:\s*hasPlatformControlPermissionCodes\(permissions\)/);
+  assert.match(
+    routeSource,
+    /if \(hasPlatformControlPermissionCodes\(row\.attrs\?\.permissions\)\) \{[\s\S]*?PLATFORM_IDENTITY_MANAGED_SEPARATELY/
   );
 });
