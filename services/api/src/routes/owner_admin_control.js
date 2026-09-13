@@ -27,6 +27,10 @@ const SETTING_STATUSES = new Set(["active", "deprecated", "disabled"]);
 const DEVICE_TRUST_STATES = new Set(["trusted", "untrusted", "revoked"]);
 const SCHEMA_CATALOG_ALLOWLIST = Object.freeze(["kernel", "tenant", "security", "eip_core", "eip_auth"]);
 const BOOTSTRAP_TTL_MS = 48 * 60 * 60 * 1000;
+const RETIRED_GLOBAL_PERMISSION_CODES = new Set([
+  "OWNER_ADMIN_TENANT_REQUEST_READ",
+  "OWNER_ADMIN_TENANT_REQUEST_WRITE",
+]);
 
 const OWNER_ADMIN_PERMISSION_CODES = Object.freeze([
   "OWNER_ADMIN_CONSOLE_READ",
@@ -38,8 +42,6 @@ const OWNER_ADMIN_PERMISSION_CODES = Object.freeze([
   "OWNER_ADMIN_SETTINGS_WRITE",
   "OWNER_ADMIN_AUDIT_READ",
   "OWNER_ADMIN_SCHEMA_READ",
-  "OWNER_ADMIN_TENANT_REQUEST_READ",
-  "OWNER_ADMIN_TENANT_REQUEST_WRITE",
   "OWNER_ADMIN_CONNECTION_READ",
   "OWNER_ADMIN_CONNECTION_WRITE",
   "OWNER_ADMIN_CONNECTION_SECRET_MANAGE",
@@ -77,6 +79,45 @@ function normalizePermissionCodes(values) {
     output.push(code);
   }
   return output;
+}
+
+function hasPlatformControlPermissionCodes(values) {
+  return normalizePermissionCodes(values).some((code) => code.startsWith("PLATFORM_"));
+}
+
+function validateTenantManagedPermissionCodes(values, actorPermissions = []) {
+  const permissions = normalizePermissionCodes(values);
+  const actorPermissionSet = new Set(normalizePermissionCodes(actorPermissions));
+  const platformForbidden = [];
+  const escalationForbidden = [];
+
+  for (const code of permissions) {
+    if (code.startsWith("PLATFORM_") || RETIRED_GLOBAL_PERMISSION_CODES.has(code)) {
+      platformForbidden.push(code);
+      continue;
+    }
+    if (!actorPermissionSet.has(code)) {
+      escalationForbidden.push(code);
+    }
+  }
+
+  if (platformForbidden.length) {
+    return {
+      ok: false,
+      error: "PLATFORM_PERMISSION_ASSIGNMENT_FORBIDDEN",
+      permissions,
+      forbidden: platformForbidden,
+    };
+  }
+  if (escalationForbidden.length) {
+    return {
+      ok: false,
+      error: "PERMISSION_ESCALATION_FORBIDDEN",
+      permissions,
+      forbidden: escalationForbidden,
+    };
+  }
+  return { ok: true, error: null, permissions, forbidden: [] };
 }
 
 function bootstrapPepper(app) {
@@ -220,6 +261,7 @@ async function writeAudit(app, session, event) {
 
 function mapControlUser(row) {
   const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  const permissions = normalizePermissionCodes(attrs.permissions);
   return {
     id: row.id,
     login: row.login,
@@ -228,8 +270,9 @@ function mapControlUser(row) {
     is_active: row.is_active === true,
     is_locked: row.is_locked === true,
     status: row.is_locked ? "locked" : row.is_active ? "active" : "inactive",
-    permissions: normalizePermissionCodes(attrs.permissions),
-    permission_count: normalizePermissionCodes(attrs.permissions).length,
+    permissions,
+    permission_count: permissions.length,
+    platform_managed: hasPlatformControlPermissionCodes(permissions),
     agent_id: row.agent_id || null,
     agent_code: row.agent_code || null,
     agent_name: row.agent_name || null,
@@ -456,7 +499,14 @@ export default async function ownerAdminControlRoutes(app) {
       const login = normalizeText(req.body?.login).toLowerCase();
       const email = normalizeEmail(req.body?.email || (login.includes("@") ? login : ""));
       const password = String(req.body?.password || "");
-      const permissions = normalizePermissionCodes(req.body?.permissions);
+      const permissionDecision = validateTenantManagedPermissionCodes(
+        req.body?.permissions,
+        session.permission_codes
+      );
+      if (!permissionDecision.ok) {
+        return reply.code(403).send({ ok: false, error: permissionDecision.error });
+      }
+      const permissions = permissionDecision.permissions;
       const agentId = normalizeText(req.body?.agent_id) || null;
       const strength = evaluatePasswordStrength(password);
       if (!strength.ok) {
@@ -564,7 +614,13 @@ export default async function ownerAdminControlRoutes(app) {
       if (!hasActive && !hasLocked && !hasPermissions && !hasAgent) {
         return reply.code(400).send({ ok: false, error: "NO_CHANGES" });
       }
-      const permissions = hasPermissions ? normalizePermissionCodes(req.body.permissions) : null;
+      const permissionDecision = hasPermissions
+        ? validateTenantManagedPermissionCodes(req.body.permissions, session.permission_codes)
+        : { ok: true, error: null, permissions: null };
+      if (!permissionDecision.ok) {
+        return reply.code(403).send({ ok: false, error: permissionDecision.error });
+      }
+      const permissions = permissionDecision.permissions;
       const agentId = hasAgent ? normalizeText(req.body.agent_id) || null : undefined;
 
       const client = await app.db.connect();
@@ -586,6 +642,10 @@ export default async function ownerAdminControlRoutes(app) {
         }
 
         const row = current.rows[0];
+        if (hasPlatformControlPermissionCodes(row.attrs?.permissions)) {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ ok: false, error: "PLATFORM_IDENTITY_MANAGED_SEPARATELY" });
+        }
         const nextAttrs = row.attrs && typeof row.attrs === "object" ? { ...row.attrs } : {};
         if (permissions) nextAttrs.permissions = permissions;
         const nextActive = hasActive ? req.body.is_active : row.is_active;
@@ -1413,6 +1473,8 @@ export default async function ownerAdminControlRoutes(app) {
 
 export {
   OWNER_ADMIN_PERMISSION_CODES,
+  hasPlatformControlPermissionCodes,
   hashBootstrapToken,
   normalizePermissionCodes,
+  validateTenantManagedPermissionCodes,
 };
