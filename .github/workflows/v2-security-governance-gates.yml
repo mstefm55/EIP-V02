@@ -3,6 +3,13 @@ name: V2 Security Governance Gates
 on:
   pull_request:
   push:
+    branches:
+      - main
+      - feature/route-temporal-gate-v1
+
+concurrency:
+  group: v2-security-governance-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
