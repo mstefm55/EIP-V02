@@ -85,6 +85,11 @@ function hasPlatformControlPermissionCodes(values) {
   return normalizePermissionCodes(values).some((code) => code.startsWith("PLATFORM_"));
 }
 
+function platformTargetRequiresSeparateManagement(targetPermissions, actorIdentityId, targetIdentityId) {
+  if (!hasPlatformControlPermissionCodes(targetPermissions)) return false;
+  return normalizeText(actorIdentityId) !== normalizeText(targetIdentityId);
+}
+
 function validateTenantManagedPermissionCodes(values, actorPermissions = []) {
   const permissions = normalizePermissionCodes(values);
   const actorPermissionSet = new Set(normalizePermissionCodes(actorPermissions));
@@ -777,20 +782,60 @@ export default async function ownerAdminControlRoutes(app) {
         return reply.code(409).send({ ok: false, error: "CURRENT_SESSION_PROTECTED" });
       }
 
-      const result = await app.db.query(
-        `
-        UPDATE eip_auth.auth_session
-        SET is_revoked = true,
-            revoked_at = COALESCE(revoked_at, now())
-        WHERE tenant_id = $1::uuid
-          AND id = $2::uuid
-          AND is_revoked = false
-        RETURNING identity_id
-        `,
-        [session.tenant_id, targetId]
-      );
-      if (result.rowCount !== 1) {
-        return reply.code(404).send({ ok: false, error: "SESSION_NOT_FOUND" });
+      const client = await app.db.connect();
+      let targetIdentityId = null;
+      try {
+        await client.query("BEGIN");
+        const target = await client.query(
+          `
+          SELECT target_session.identity_id,
+                 COALESCE(target_identity.attrs, '{}'::jsonb) AS attrs
+          FROM eip_auth.auth_session AS target_session
+          JOIN eip_auth.auth_identity AS target_identity
+            ON target_identity.tenant_id = target_session.tenant_id
+           AND target_identity.id = target_session.identity_id
+          WHERE target_session.tenant_id = $1::uuid
+            AND target_session.id = $2::uuid
+            AND target_session.is_revoked = false
+          FOR UPDATE OF target_session, target_identity
+          `,
+          [session.tenant_id, targetId]
+        );
+        if (target.rowCount !== 1) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ ok: false, error: "SESSION_NOT_FOUND" });
+        }
+        targetIdentityId = target.rows[0].identity_id;
+        if (platformTargetRequiresSeparateManagement(
+          target.rows[0].attrs?.permissions,
+          session.identity_id,
+          targetIdentityId
+        )) {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ ok: false, error: "PLATFORM_IDENTITY_MANAGED_SEPARATELY" });
+        }
+
+        const updated = await client.query(
+          `
+          UPDATE eip_auth.auth_session
+          SET is_revoked = true,
+              revoked_at = COALESCE(revoked_at, now())
+          WHERE tenant_id = $1::uuid
+            AND id = $2::uuid
+            AND is_revoked = false
+          RETURNING identity_id
+          `,
+          [session.tenant_id, targetId]
+        );
+        if (updated.rowCount !== 1) {
+          throw new Error("SESSION_STATE_CHANGED");
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
       }
 
       await writeAudit(app, session, {
@@ -800,7 +845,7 @@ export default async function ownerAdminControlRoutes(app) {
         subjectKind: "auth_session",
         subjectId: targetId,
         summary: "Revoked an active session",
-        attrs: { target_identity_id: result.rows[0].identity_id },
+        attrs: { target_identity_id: targetIdentityId },
       });
       return reply.send({ ok: true, session_id: targetId, revoked: true });
     }
@@ -837,6 +882,34 @@ export default async function ownerAdminControlRoutes(app) {
       let identityId = null;
       try {
         await client.query("BEGIN");
+        const target = await client.query(
+          `
+          SELECT target_device.identity_id,
+                 COALESCE(target_identity.attrs, '{}'::jsonb) AS attrs
+          FROM eip_auth.auth_device AS target_device
+          JOIN eip_auth.auth_identity AS target_identity
+            ON target_identity.tenant_id = target_device.tenant_id
+           AND target_identity.id = target_device.identity_id
+          WHERE target_device.tenant_id = $1::uuid
+            AND target_device.id = $2::uuid
+          FOR UPDATE OF target_device, target_identity
+          `,
+          [session.tenant_id, targetId]
+        );
+        if (target.rowCount !== 1) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ ok: false, error: "DEVICE_NOT_FOUND" });
+        }
+        identityId = target.rows[0].identity_id;
+        if (platformTargetRequiresSeparateManagement(
+          target.rows[0].attrs?.permissions,
+          session.identity_id,
+          identityId
+        )) {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ ok: false, error: "PLATFORM_IDENTITY_MANAGED_SEPARATELY" });
+        }
+
         const updated = await client.query(
           `
           UPDATE eip_auth.auth_device
@@ -850,10 +923,8 @@ export default async function ownerAdminControlRoutes(app) {
           [session.tenant_id, targetId, trustState]
         );
         if (updated.rowCount !== 1) {
-          await client.query("ROLLBACK");
-          return reply.code(404).send({ ok: false, error: "DEVICE_NOT_FOUND" });
+          throw new Error("DEVICE_STATE_CHANGED");
         }
-        identityId = updated.rows[0].identity_id;
         if (trustState === "revoked") {
           await client.query(
             `
@@ -1476,5 +1547,6 @@ export {
   hasPlatformControlPermissionCodes,
   hashBootstrapToken,
   normalizePermissionCodes,
+  platformTargetRequiresSeparateManagement,
   validateTenantManagedPermissionCodes,
 };
