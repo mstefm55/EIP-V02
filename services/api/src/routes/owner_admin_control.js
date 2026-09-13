@@ -81,6 +81,10 @@ function normalizePermissionCodes(values) {
   return output;
 }
 
+function hasPlatformControlPermissionCodes(values) {
+  return normalizePermissionCodes(values).some((code) => code.startsWith("PLATFORM_"));
+}
+
 function validateTenantManagedPermissionCodes(values, actorPermissions = []) {
   const permissions = normalizePermissionCodes(values);
   const actorPermissionSet = new Set(normalizePermissionCodes(actorPermissions));
@@ -257,6 +261,7 @@ async function writeAudit(app, session, event) {
 
 function mapControlUser(row) {
   const attrs = row.attrs && typeof row.attrs === "object" ? row.attrs : {};
+  const permissions = normalizePermissionCodes(attrs.permissions);
   return {
     id: row.id,
     login: row.login,
@@ -265,8 +270,9 @@ function mapControlUser(row) {
     is_active: row.is_active === true,
     is_locked: row.is_locked === true,
     status: row.is_locked ? "locked" : row.is_active ? "active" : "inactive",
-    permissions: normalizePermissionCodes(attrs.permissions),
-    permission_count: normalizePermissionCodes(attrs.permissions).length,
+    permissions,
+    permission_count: permissions.length,
+    platform_managed: hasPlatformControlPermissionCodes(permissions),
     agent_id: row.agent_id || null,
     agent_code: row.agent_code || null,
     agent_name: row.agent_name || null,
@@ -636,6 +642,10 @@ export default async function ownerAdminControlRoutes(app) {
         }
 
         const row = current.rows[0];
+        if (hasPlatformControlPermissionCodes(row.attrs?.permissions)) {
+          await client.query("ROLLBACK");
+          return reply.code(403).send({ ok: false, error: "PLATFORM_IDENTITY_MANAGED_SEPARATELY" });
+        }
         const nextAttrs = row.attrs && typeof row.attrs === "object" ? { ...row.attrs } : {};
         if (permissions) nextAttrs.permissions = permissions;
         const nextActive = hasActive ? req.body.is_active : row.is_active;
@@ -1463,6 +1473,7 @@ export default async function ownerAdminControlRoutes(app) {
 
 export {
   OWNER_ADMIN_PERMISSION_CODES,
+  hasPlatformControlPermissionCodes,
   hashBootstrapToken,
   normalizePermissionCodes,
   validateTenantManagedPermissionCodes,
